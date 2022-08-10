@@ -13,7 +13,7 @@ def cast_ray(ray, scene, mesh, max_dist, depth, verts=None, lt2=None):
 
     if verts == None:
         verts = []
-    if lt2 == None: # 
+    if lt2 == None: #List to draw normals for each hit
         lt2 = []
     rays = o3d.core.Tensor(
         [ray.origin().to_list() + ray.direction().to_list()],
@@ -43,6 +43,7 @@ def cast_rays(rays, scene, max_dist, depth):
     pass
 
 
+#Create lines based on vertexes
 def create_lines(verts):
     lines = []
     if len(verts) == 2:
@@ -52,6 +53,7 @@ def create_lines(verts):
     return lines
 
 
+#Create line set to visualize using the points and lines
 def create_lineset(points, lines, c):
     if c == True:
         colors = [[1, 0, 0] for _ in range(len(lines))]
@@ -59,7 +61,7 @@ def create_lineset(points, lines, c):
     else:
         colors = [[0, 0, 1] for _ in range(len(lines))]
         if len(colors) > 0:
-            colors[-1] = [0, 1, 0]
+            colors[-1] = [0, 1, 0] #The last ray drawn from an origin will be green
 
     line_set = o3d.geometry.LineSet()
     line_set.points = o3d.utility.Vector3dVector(points)
@@ -78,10 +80,12 @@ def main():
     scene.add_triangles(mesh_t)
 
     t_list = [mesh]
-    for i in range(200):
-        dire = Vec3.random_in_unit_sphere()
-        r = Ray(Vec3(-160, 10, 0), dire)
-        points, nms = cast_ray(r, scene, mesh_t, 1, 5, verts=[r.origin().to_list()])
+
+    #generate rays and normals to map
+    for i in range(200): 
+        dire = Vec3.random_in_unit_sphere() #direction of ray
+        r = Ray(Vec3(-160, 10, 0), dire) #First Vec3 is origin of the ray
+        points, nms = cast_ray(r, scene, mesh_t, 1, 5, verts=[r.origin().to_list()]) #points is where the ray hits and nms is the normals
         lines = create_lines(points)
         line_set = create_lineset(points, lines, False)
         t_list.append(line_set)
