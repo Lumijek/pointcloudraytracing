@@ -3,8 +3,8 @@ from ray import Ray
 from vec3 import Vec3, Color
 import numpy as np
 from line_profiler import LineProfiler
-
-
+import math
+from pprint import pprint
 # single ray cast
 def cast_ray(ray, scene, mesh, depth, sink_id, baseray=None, verts=None, lt2=None, hit_sink = []):
     if depth <= 0:
@@ -39,8 +39,8 @@ def cast_ray(ray, scene, mesh, depth, sink_id, baseray=None, verts=None, lt2=Non
         verts.append(ray.at(t).to_list())
         cast_ray(reflected_ray, scene, mesh, depth - 1, sink_id, baseray, verts, lt2, hit_sink)
     if t == np.inf:
-        pass
-        verts.append(ray.at(30).to_list())
+        verts.append(ray.at(100).to_list())
+
     return (verts, lt2, hit_sink)
 
 
@@ -52,8 +52,6 @@ def cast_rays(rays, scene, max_dist, depth):
 #Create lines based on vertexes
 def create_lines(verts):
     lines = []
-    if len(verts) == 2:
-        return []
     for i in range(len(verts) - 1):
         lines.append([i, i + 1])
     return lines
@@ -66,8 +64,8 @@ def create_lineset(points, lines, c):
 
     else:
         colors = [[0, 0, 1] for _ in range(len(lines))]
-        if len(colors) > 0:
-            colors[-1] = [0, 1, 0] #The last ray drawn from an origin will be green
+        #if len(colors) > 0:
+        #    colors[-1] = [0, 1, 0] #The last ray drawn from an origin will be green
 
     line_set = o3d.geometry.LineSet()
     line_set.points = o3d.utility.Vector3dVector(points)
@@ -89,6 +87,20 @@ def create_sink(scene, s_type, dim, pos):
         box_id = scene.add_triangles(box_t)
         return box, box_id
 
+def generate_rays_fib(number, center):
+    rays = []
+    phi = math.pi * (3. - math.sqrt(5.))
+
+    for i in range(number):
+        y = (1 - (i / float(number - 1)) * 2)
+        radius = math.sqrt(1 - y * y)
+        theta = phi * i
+
+        x = math.cos(theta) * radius
+        z = math.sin(theta) * radius
+
+        rays.append(Ray(center, Vec3(x, y, z)))
+    return rays
 
 def main():
     file_name = "pointclouds/dt_mesh.obj"
@@ -102,10 +114,9 @@ def main():
 
     t_list = [mesh, box]
 
+    rays = generate_rays_fib(100, Vec3(-160, 300, 0))
     #generate rays and normals to map
-    for i in range(100000): 
-        dire = Vec3.random_in_unit_sphere() #direction of ray
-        r = Ray(Vec3(-160, 10, 0), dire) #First Vec3 is origin of the ray
+    for r in rays:
         points, nms, sink = cast_ray(r, scene, mesh_t, 5, box_id, baseray = r,verts=[r.origin().to_list()]) #points is where the ray hits and nms is the normals
         lines = create_lines(points)
         line_set = create_lineset(points, lines, False)
@@ -127,7 +138,7 @@ def main():
         fl = create_lineset(nms, li, True)
         n_list.append(fl)
 
-    o3d.visualization.draw_geometries(n_list)
+    o3d.visualization.draw_geometries(t_list)
 
 lp = LineProfiler()
 lp_wrapper = lp(main)

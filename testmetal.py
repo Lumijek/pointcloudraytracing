@@ -15,14 +15,12 @@ def main():
 	    mps_device = torch.device("mps")
 
 	    # Create a Tensor directly on the mps device
-	    print(mps_device)
-	    #x = torch.ones(5, device="mps")
+	    x = torch.ones(5, device="mps")
 	    # Or
 	    x = torch.ones(5, device="mps")
-	    print(x)
-
 	    # Any operation happens on the GPU
-	    y = x * 2
+	    for i in range(10000):
+	    	y = 3 * 2
 
 	    # Move your model to mps just like any other device
 lp = LineProfiler()
