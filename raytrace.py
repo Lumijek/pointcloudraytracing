@@ -84,7 +84,7 @@ def create_sink(scene, s_type, dim, pos):
         sphere_id = scene.add_triangles(sphere_t)
         return sphere, sphere_id
     elif s_type == "box": #dim should be [x, y, z]
-        box = o3d.geometry.TriangleMesh.create_sphere(dim[0], dim[1], dim[2]).translate(pos)
+        box = o3d.geometry.TriangleMesh.create_box(dim[0], dim[1], dim[2]).translate(pos)
         box_t = o3d.t.geometry.TriangleMesh.from_legacy(box)
         box_id = scene.add_triangles(box_t)
         return box, box_id
@@ -98,15 +98,15 @@ def main():
 
     scene = o3d.t.geometry.RaycastingScene()
     a = scene.add_triangles(mesh_t)
-    sphere, sphere_id = create_sink(scene, "sphere", 20, Vec3(-180, 100, 0))
+    box, box_id = create_sink(scene, "box", [40, 40, 40], Vec3(-210, 200, 50))
 
-    t_list = [mesh, sphere]
+    t_list = [mesh, box]
 
     #generate rays and normals to map
     for i in range(100000): 
         dire = Vec3.random_in_unit_sphere() #direction of ray
         r = Ray(Vec3(-160, 10, 0), dire) #First Vec3 is origin of the ray
-        points, nms, sink = cast_ray(r, scene, mesh_t, 5, sphere_id, baseray = r,verts=[r.origin().to_list()]) #points is where the ray hits and nms is the normals
+        points, nms, sink = cast_ray(r, scene, mesh_t, 5, box_id, baseray = r,verts=[r.origin().to_list()]) #points is where the ray hits and nms is the normals
         lines = create_lines(points)
         line_set = create_lineset(points, lines, False)
         t_list.append(line_set)
@@ -117,9 +117,9 @@ def main():
     '''
     TO VISUALIZE ALL THE RAYS THAT HIT THE SINK//DELETE CODE LATER
     '''
-    n_list = [mesh, sphere]
+    n_list = [mesh, box]
     for j in range(len(sink)):
-        points, nms, sink = cast_ray(sink[j], scene, mesh_t, 5, sphere_id, baseray = sink[j],verts=[sink[j].origin().to_list()]) #points is where the ray hits and nms is the normals
+        points, nms, sink = cast_ray(sink[j], scene, mesh_t, 5, box_id, baseray = sink[j],verts=[sink[j].origin().to_list()]) #points is where the ray hits and nms is the normals
         lines = create_lines(points)
         line_set = create_lineset(points, lines, False)
         n_list.append(line_set)
