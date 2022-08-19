@@ -110,11 +110,11 @@ def main():
 
     scene = o3d.t.geometry.RaycastingScene()
     a = scene.add_triangles(mesh_t)
-    box, box_id = create_sink(scene, "box", [40, 40, 40], Vec3(-210, 200, 50))
+    box, box_id = create_sink(scene, "box", [40, 40, 40], Vec3(-210, 200, 50)) #if sphere, dim = radius, if box, dim = [x, y, z] pos or Vec3(x, y , z)
 
-    t_list = [mesh, box]
+    t_list = [mesh, box] #list contains all rays that were sent out
 
-    rays = generate_rays_fib(100, Vec3(-160, 300, 0))
+    rays = generate_rays_fib(1000, Vec3(-160, 300, 0))
     #generate rays and normals to map
     for r in rays:
         points, nms, sink = cast_ray(r, scene, mesh_t, 5, box_id, baseray = r,verts=[r.origin().to_list()]) #points is where the ray hits and nms is the normals
@@ -126,9 +126,9 @@ def main():
         t_list.append(fl)
 
     '''
-    TO VISUALIZE ALL THE RAYS THAT HIT THE SINK//DELETE CODE LATER
+    TO VISUALIZE ALL THE RAYS THAT HIT THE SINK QUICKLY // DELETE CODE LATER
     '''
-    n_list = [mesh, box]
+    n_list = [mesh, box] #list contains all rays that hit the reciever
     for j in range(len(sink)):
         points, nms, sink = cast_ray(sink[j], scene, mesh_t, 5, box_id, baseray = sink[j],verts=[sink[j].origin().to_list()]) #points is where the ray hits and nms is the normals
         lines = create_lines(points)
@@ -138,7 +138,7 @@ def main():
         fl = create_lineset(nms, li, True)
         n_list.append(fl)
 
-    o3d.visualization.draw_geometries(t_list)
+    o3d.visualization.draw_geometries(n_list)
 
 lp = LineProfiler()
 lp_wrapper = lp(main)
