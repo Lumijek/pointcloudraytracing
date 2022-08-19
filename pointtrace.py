@@ -24,7 +24,7 @@ def fitPLaneLTSQ(XYZ):
 def signed_distance(pi, pj, ni):
     return ni.dot(pi - pj)
 
-@profile
+#@profile
 def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     [k, idx, _] = pcd_tree.search_knn_vector_3d(point, k)
     found_points = points[idx]    
@@ -45,7 +45,7 @@ def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     activated[idx] = True
     return Splat(center, normal, radius, points)
 
-@profile
+#@profile
 def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
     activated = np.full(len(points), False)
     available_indices = np.where(activated == 0)[0]
@@ -61,7 +61,7 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
 
 
     
-@profile
+#@profile
 def main():
     file_name = "pointclouds/san.ply"
     p = 377292
