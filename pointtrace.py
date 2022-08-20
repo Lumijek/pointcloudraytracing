@@ -9,6 +9,7 @@ from time import perf_counter
 from splat import Splat, World
 from pprint import pprint
 
+@profile
 def fitPLaneLTSQ(XYZ):
     [rows,cols] = XYZ.shape
     G = np.ones((rows,3))
@@ -24,22 +25,24 @@ def fitPLaneLTSQ(XYZ):
 def signed_distance(pi, pj, ni):
     return ni.dot(pi - pj)
 
-#@profile
+@profile
 def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     [k, idx, _] = pcd_tree.search_knn_vector_3d(point, k)
     found_points = points[idx]    
     normal = fitPLaneLTSQ(found_points)
-    sds = []
-    i = 0
-    while True:
-        h = normal.dot(found_points[0] - found_points[i])
-        if abs(h) < threshold and i + 1 < k:
-            sds.append(h)
-        else:
-            center = found_points[0] + ((max(sds) - min(sds)) / 2) * normal
-            radius = np.linalg.norm((found_points[i] - center) - normal.dot(found_points[i] - center) * normal)
-            break
-        i += 1
+    h = (found_points[0] - found_points).dot(normal)
+    f = np.abs(h) < threshold
+    v = np.where(f == 0)[0]
+    if v.size == 0:
+        ind = k - 1
+        trueh = h
+    else:
+        ind = v[0]
+        trueh = h[:ind]
+
+    center = found_points[0] + normal * ((np.amax(trueh) - np.amin(trueh)) / 2)
+    radius = np.linalg.norm((found_points[ind] - center) - normal.dot(found_points[ind] - center) * normal)
+
     [k, idx, _] = pcd_tree.search_radius_vector_3d(point, radius * perc)
     np.asarray(pcd.colors)[idx[1:], :] = [0, 1, 1] # Convert all relevant points to blue.
     activated[idx] = True
@@ -53,7 +56,7 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
     while True:#sum(available_indices) != len(points):
         i += 1
         if i % 10000 == 0:
-            print(np.sum(activated))
+            print(np.sum(activated), i)
         p = np.random.choice(available_indices)
         #print(p)
         c_splat = generate_splat(pcd, pcd_tree, pcd.points[p], k, threshold, perc, points, activated)
@@ -61,13 +64,13 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
 
 
     
-#@profile
+@profile
 def main():
     file_name = "pointclouds/san.ply"
     p = 377292
     pcd = o3d.io.read_point_cloud(file_name)
     points = np.asarray(pcd.points)
-    points += np.array([[np.random.uniform(-0.000001, 0.000001), np.random.uniform(-0.000001, 0.000001), np.random.uniform(-0.000001, 0.000001)] for i in range(len(points))])
+    points += np.random.normal(0, 0.000001, points.shape)
     pcd.points = o3d.utility.Vector3dVector(points)
     pcd_tree = o3d.geometry.KDTreeFlann(pcd)
     #center, normal = generate_splat(pcd, pcd_tree, pcd.points[p], 500, 1, 0.4, points, activated)
