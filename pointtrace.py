@@ -8,8 +8,9 @@ from line_profiler import LineProfiler
 from time import perf_counter
 from splat import Splat, World
 from pprint import pprint
-
-@profile
+import matplotlib.pyplot as plt
+number_of_splats = [0]
+number_of_points = [0]
 def fitPLaneLTSQ(XYZ):
     [rows,cols] = XYZ.shape
     G = np.ones((rows,3))
@@ -25,7 +26,6 @@ def fitPLaneLTSQ(XYZ):
 def signed_distance(pi, pj, ni):
     return ni.dot(pi - pj)
 
-@profile
 def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     [k, idx, _] = pcd_tree.search_knn_vector_3d(point, k)
     found_points = points[idx]    
@@ -44,48 +44,57 @@ def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     radius = np.linalg.norm((found_points[ind] - center) - normal.dot(found_points[ind] - center) * normal)
 
     [k, idx, _] = pcd_tree.search_radius_vector_3d(point, radius * perc)
-    np.asarray(pcd.colors)[idx[1:], :] = [0, 1, 1] # Convert all relevant points to blue.
+    np.asarray(pcd.colors)[idx, :] = [0, 1, 1] # Convert all relevant points to blue.
+    s = (np.size(activated[idx]) - np.count_nonzero(activated[idx]))
+    number_of_points.append(number_of_points[-1] + s)
     activated[idx] = True
     return Splat(center, normal, radius, points)
 
+#Plot
+#X-axis - number of splats
+#Y-axis - number of points covered
 #@profile
 def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
     activated = np.full(len(points), False)
     available_indices = np.where(activated == 0)[0]
     i = 0
+    c = 0
     while True:#sum(available_indices) != len(points):
         i += 1
         if i % 10000 == 0:
-            print(np.sum(activated), i)
+            c += 1
+            s = np.sum(activated)
+            print(s, i)
+            if s > 9600000:
+                break
+            if c == 200:
+                break
         p = np.random.choice(available_indices)
-        #print(p)
         c_splat = generate_splat(pcd, pcd_tree, pcd.points[p], k, threshold, perc, points, activated)
+        number_of_splats.append(i + 1)
         world.add_splat(c_splat)
 
 
-    
-@profile
-def main():
+def main(threshold, perc):
+    global number_of_points
+    global number_of_splats
     file_name = "pointclouds/san.ply"
-    p = 377292
     pcd = o3d.io.read_point_cloud(file_name)
     points = np.asarray(pcd.points)
     points += np.random.normal(0, 0.000001, points.shape)
     pcd.points = o3d.utility.Vector3dVector(points)
     pcd_tree = o3d.geometry.KDTreeFlann(pcd)
-    #center, normal = generate_splat(pcd, pcd_tree, pcd.points[p], 500, 1, 0.4, points, activated)
     world = World()
-    create_splats(world, pcd, pcd_tree, 200, 1, 0.8, points)
-    endl = (pcd.points[p] + normal * 500)
-    ori = pcd.points[p].tolist()
-    pons = [center, endl.tolist()]
-    lins = [[0, 1]]
-    cols = [[1, 0, 0]]
-    line_set = o3d.geometry.LineSet()
-    line_set.points = o3d.utility.Vector3dVector(pons)
-    line_set.lines = o3d.utility.Vector2iVector(lins)
-    line_set.colors = o3d.utility.Vector3dVector(cols)
-    o3d.visualization.draw_geometries([pcd, line_set])
+    create_splats(world, pcd, pcd_tree, 100, threshold, perc, points)
+    #m = o3d.geometry.TriangleMesh.create_cylinder(radius = 50, height = 1, resolution = 100)
+    #plt.plot(number_of_splats, number_of_points)
+    #plt.title(f"Splats vs Points (perc: {perc})")
+    #plt.xlabel("Number of splats")
+    #plt.ylabel("Number of points")
+    #plt.savefig(f'perc{str(perc).replace(".", "-")}.png', bbox_inches='tight')
+    #plt.clf()
+    #number_of_splats = [0]
+    #number_of_points = [0]
+    o3d.visualization.draw_geometries([pcd])
 
-
-main()
+main(0.1, 0.8)
