@@ -5,15 +5,18 @@ import numpy as np
 from line_profiler import LineProfiler
 import math
 from pprint import pprint
+
 # single ray cast
-def cast_ray(ray, scene, mesh, depth, sink_id, baseray=None, verts=None, lt2=None, hit_sink = []):
+def cast_ray(
+    ray, scene, mesh, depth, sink_id, baseray=None, verts=None, lt2=None, hit_sink=[]
+):
     if depth <= 0:
         verts.append(ray.at(30).to_list())
         return (verts, lt2, hit_sink)
 
     if verts == None:
         verts = []
-    if lt2 == None: #List to draw normals for each hit
+    if lt2 == None:  # List to draw normals for each hit
         lt2 = []
     if hit_sink == None:
         hit_sink = []
@@ -37,7 +40,17 @@ def cast_ray(ray, scene, mesh, depth, sink_id, baseray=None, verts=None, lt2=Non
         lt2.append(ray.at(t).to_list())
         lt2.append((ray.at(t) + norm * 5).to_list())
         verts.append(ray.at(t).to_list())
-        cast_ray(reflected_ray, scene, mesh, depth - 1, sink_id, baseray, verts, lt2, hit_sink)
+        cast_ray(
+            reflected_ray,
+            scene,
+            mesh,
+            depth - 1,
+            sink_id,
+            baseray,
+            verts,
+            lt2,
+            hit_sink,
+        )
     if t == np.inf:
         verts.append(ray.at(100).to_list())
 
@@ -49,7 +62,7 @@ def cast_rays(rays, scene, max_dist, depth):
     pass
 
 
-#Create lines based on vertexes
+# Create lines based on vertexes
 def create_lines(verts):
     lines = []
     for i in range(len(verts) - 1):
@@ -57,14 +70,14 @@ def create_lines(verts):
     return lines
 
 
-#Create line set to visualize using the points and lines
+# Create line set to visualize using the points and lines
 def create_lineset(points, lines, c):
     if c == True:
         colors = [[1, 0, 0] for _ in range(len(lines))]
 
     else:
         colors = [[0, 0, 1] for _ in range(len(lines))]
-        #if len(colors) > 0:
+        # if len(colors) > 0:
         #    colors[-1] = [0, 1, 0] #The last ray drawn from an origin will be green
 
     line_set = o3d.geometry.LineSet()
@@ -72,6 +85,7 @@ def create_lineset(points, lines, c):
     line_set.lines = o3d.utility.Vector2iVector(lines)
     line_set.colors = o3d.utility.Vector3dVector(colors)
     return line_set
+
 
 def create_sink(scene, s_type, dim, pos):
     if isinstance(pos, Vec3):
@@ -81,18 +95,21 @@ def create_sink(scene, s_type, dim, pos):
         sphere_t = o3d.t.geometry.TriangleMesh.from_legacy(sphere)
         sphere_id = scene.add_triangles(sphere_t)
         return sphere, sphere_id
-    elif s_type == "box": #dim should be [x, y, z]
-        box = o3d.geometry.TriangleMesh.create_box(dim[0], dim[1], dim[2]).translate(pos)
+    elif s_type == "box":  # dim should be [x, y, z]
+        box = o3d.geometry.TriangleMesh.create_box(dim[0], dim[1], dim[2]).translate(
+            pos
+        )
         box_t = o3d.t.geometry.TriangleMesh.from_legacy(box)
         box_id = scene.add_triangles(box_t)
         return box, box_id
 
+
 def generate_rays_fib(number, center):
     rays = []
-    phi = math.pi * (3. - math.sqrt(5.))
+    phi = math.pi * (3.0 - math.sqrt(5.0))
 
     for i in range(number):
-        y = (1 - (i / float(number - 1)) * 2)
+        y = 1 - (i / float(number - 1)) * 2
         radius = math.sqrt(1 - y * y)
         theta = phi * i
 
@@ -102,6 +119,7 @@ def generate_rays_fib(number, center):
         rays.append(Ray(center, Vec3(x, y, z)))
     return rays
 
+
 def main():
     file_name = "pointclouds/dt_mesh.obj"
     mesh = o3d.io.read_triangle_mesh(file_name)
@@ -110,14 +128,18 @@ def main():
 
     scene = o3d.t.geometry.RaycastingScene()
     a = scene.add_triangles(mesh_t)
-    box, box_id = create_sink(scene, "box", [40, 40, 40], Vec3(-210, 200, 50)) #if sphere, dim = radius, if box, dim = [x, y, z] pos or Vec3(x, y , z)
+    box, box_id = create_sink(
+        scene, "box", [40, 40, 40], Vec3(-210, 200, 50)
+    )  # if sphere, dim = radius, if box, dim = [x, y, z] pos or Vec3(x, y , z)
 
-    t_list = [mesh, box] #list contains all rays that were sent out
+    t_list = [mesh, box]  # list contains all rays that were sent out
 
     rays = generate_rays_fib(1000, Vec3(-160, 300, 0))
-    #generate rays and normals to map
+    # generate rays and normals to map
     for r in rays:
-        points, nms, sink = cast_ray(r, scene, mesh_t, 5, box_id, baseray = r,verts=[r.origin().to_list()]) #points is where the ray hits and nms is the normals
+        points, nms, sink = cast_ray(
+            r, scene, mesh_t, 5, box_id, baseray=r, verts=[r.origin().to_list()]
+        )  # points is where the ray hits and nms is the normals
         lines = create_lines(points)
         line_set = create_lineset(points, lines, False)
         t_list.append(line_set)
@@ -125,12 +147,20 @@ def main():
         fl = create_lineset(nms, li, True)
         t_list.append(fl)
 
-    '''
+    """
     TO VISUALIZE ALL THE RAYS THAT HIT THE SINK QUICKLY // DELETE CODE LATER
-    '''
-    n_list = [mesh, box] #list contains all rays that hit the reciever
+    """
+    n_list = [mesh, box]  # list contains all rays that hit the reciever
     for j in range(len(sink)):
-        points, nms, sink = cast_ray(sink[j], scene, mesh_t, 5, box_id, baseray = sink[j],verts=[sink[j].origin().to_list()]) #points is where the ray hits and nms is the normals
+        points, nms, sink = cast_ray(
+            sink[j],
+            scene,
+            mesh_t,
+            5,
+            box_id,
+            baseray=sink[j],
+            verts=[sink[j].origin().to_list()],
+        )  # points is where the ray hits and nms is the normals
         lines = create_lines(points)
         line_set = create_lineset(points, lines, False)
         n_list.append(line_set)
@@ -139,6 +169,7 @@ def main():
         n_list.append(fl)
 
     o3d.visualization.draw_geometries(n_list)
+
 
 lp = LineProfiler()
 lp_wrapper = lp(main)

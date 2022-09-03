@@ -1,8 +1,12 @@
+import numpy as np
+
+
 class Splat:
     def __init__(self, center, normal, radius, points):
         self.center = center
         self.normal = normal
         self.radius = radius
+        self.radius_squared = radius * radius
         self.points = points
 
 
@@ -15,3 +19,15 @@ class World:
 
     def intersection(self):
         return False
+
+    def construct_world_splat(self):
+        self.center = np.ndarray((len(self.splats), 3))
+        self.normal = np.ndarray((len(self.splats), 3))
+        self.radius = np.ndarray(len(self.splats))
+        self.radius_squared = np.ndarray(len(self.splats))
+
+        for i, splat in enumerate(self.splats):
+            self.center[i] = splat.center
+            self.normal[i] = splat.normal
+            self.radius[i] = splat.radius
+            self.radius_squared[i] = splat.radius_squared
