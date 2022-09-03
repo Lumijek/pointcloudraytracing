@@ -13,6 +13,7 @@ import sys
 import pdb
 from collections import defaultdict
 
+
 def nprint(var):
     print(var)
     print("\n--------------------------------------------------------\n")
@@ -75,7 +76,7 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
             c += 1
             s = np.sum(activated)
             print(s, i)
-            if s > 9500000:
+            if s > 9750000:
                 break
             if c == 200:
                 break
@@ -113,7 +114,7 @@ def improved_ray_splat_intersection(O, D, world, depth):
     t[t < 0] = np.inf
     points = O + np.einsum("ij, jl->ijl", t, D)
     distances = center[:, None] - points
-    #distances = points - O
+    # distances = points - O
     distances_squared = np.sum(np.square(distances), axis=2)
     distances_squared[distances_squared > radius_squared[:, None]] = np.inf
     k = np.where(distances_squared != np.inf)
@@ -121,7 +122,11 @@ def improved_ray_splat_intersection(O, D, world, depth):
     n = k[1].tolist()
     d = defaultdict(lambda: len(d))
     ids = np.array([d[x] for x in n])
-    l = np.max(ids) + 1
+    print(ids)
+    try:
+        l = np.max(ids) + 1
+    except:
+        return 1, 1, 1, 1, 1, 1
     origin_distances = points[k] - O[k[1]]
     k = np.column_stack((k[1], k[0], ids))
     print(k)
@@ -140,7 +145,8 @@ def improved_ray_splat_intersection(O, D, world, depth):
             hits[cid] = tk[i]
             inds[cid] = r
     ls = create_lineset(O[inds], true_points, depth)
-    return true_points, D[inds], normals, hits, ls
+    ns = create_lineset(true_points, true_points + normals * 30, 100)
+    return true_points, D[inds], normals, hits, ls, ns
 
 
 def create_lineset(O, H, depth):
@@ -153,7 +159,10 @@ def create_lineset(O, H, depth):
     for i in range(0, len(points) - 1, 2):
         lines.append([i, i + 1])
 
-    colors = [[1, 0, 0] for _ in range(len(lines))]
+    if depth == 100:
+        colors = [[0, 0, 0] for _ in range(len(lines))]
+    else:
+        colors = [[1, 0, 0] for _ in range(len(lines))]
     line_set = o3d.geometry.LineSet()
     line_set.points = o3d.utility.Vector3dVector(points)
     line_set.lines = o3d.utility.Vector2iVector(lines)
@@ -164,10 +173,14 @@ def create_lineset(O, H, depth):
 def cast_ray(world, O, D, depth, geometry):
     if depth == 0:
         return geometry
-    O, D, normals, t, line_set = improved_ray_splat_intersection(O, D, world, depth)
-    print(depth, line_set)
+    O, D, normals, t, line_set, normal_set = improved_ray_splat_intersection(O, D, world, depth)
+    if type(O) == int:
+        return geometry
     geometry.append(line_set)
-    bad_normals = np.where(np.sum(D * normals, axis=1) > 0)[0]  # If ray and normal are on same side(dot product > 0) make the normal negative
+    geometry.append(normal_set)
+    bad_normals = np.where(np.sum(D * normals, axis=1) > 0)[
+        0
+    ]  # If ray and normal are on same side(dot product > 0) make the normal negative
     normals[bad_normals] = -normals[bad_normals]
     reflected = D - 2 * np.sum(D * normals, axis=1)[:, None] * normals
     O += reflected * 1.3
@@ -176,13 +189,14 @@ def cast_ray(world, O, D, depth, geometry):
 
 
 def main():
-    number_of_rays = 3000
+    np.random.seed(3)
+    number_of_rays = 500
     O = np.zeros(number_of_rays * 3).reshape(number_of_rays, 3)
     O.T[1] = 20
     D = np.random.rand(number_of_rays * 3).reshape(number_of_rays, 3)
     D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
     threshold = 1
-    perc = 2
+    perc = 5
     file_name = "pointclouds/san.ply"
     pcd = o3d.io.read_point_cloud(file_name)
     points = np.asarray(pcd.points)
@@ -199,12 +213,11 @@ def main():
     o3d.visualization.draw_geometries(ls)
 
 
-main()
-'''
+
+
 lp = LineProfiler()
 lp_wrapper = lp(main)
 lp.add_function(cast_ray)  # add additional function to profile
 lp.add_function(improved_ray_splat_intersection)
 lp_wrapper()
 lp.print_stats()
-'''
