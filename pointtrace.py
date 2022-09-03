@@ -121,7 +121,6 @@ def improved_ray_splat_intersection(O, D, world, depth):
     mins = np.amin(distances_squared, axis=0)
     hits = np.take_along_axis(t, min_args[:, None], axis=0).diagonal()
     true_points = O + D * hits[:, None]
-    print(true_points)
     true_points[np.isinf(mins)] = np.inf
     ls = create_lineset(O, true_points, depth)
     return true_points, normal[min_args[min_args != 0]], hits[:, None], ls
@@ -167,10 +166,11 @@ def cast_ray(world, O, D, depth, geometry):
 
 def main():
     np.random.seed(1)
-    number_of_rays = 20
+    number_of_rays = 1
     O = np.zeros(number_of_rays * 3).reshape(number_of_rays, 3)
     D = np.random.rand(number_of_rays * 3).reshape(number_of_rays, 3)
-    #D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
+    D[0] = np.array([[0.03905478, 0.16983042, 0.8781425]])
+    D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
     threshold = 1
     perc = 0.8
     file_name = "pointclouds/san.ply"
