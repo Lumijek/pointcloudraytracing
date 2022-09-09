@@ -2,13 +2,10 @@ import open3d as o3d
 from ray import Ray
 from vec3 import Vec3, Color
 import numpy as np
-from scipy.spatial import KDTree, Voronoi
-import scipy
 from line_profiler import LineProfiler
 from time import perf_counter
 from splat import Splat, World
 from pprint import pprint
-import matplotlib.pyplot as plt
 import sys
 import pdb
 from collections import defaultdict
@@ -72,11 +69,11 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
     c = 0
     while True:
         i += 1
-        if i % 10000 == 0:
+        if i % 2 == 0:
             c += 1
             s = np.sum(activated)
             print(s, i)
-            if s > 9750000:
+            if s > 20000:
                 break
             if c == 200:
                 break
@@ -118,18 +115,18 @@ def improved_ray_splat_intersection(O, D, world, depth):
     distances_squared = np.sum(np.square(distances), axis=2)
     distances_squared[distances_squared > radius_squared[:, None]] = np.inf
     k = np.where(distances_squared != np.inf)
+    print(np.sum(world.radius) / world.radius.size)
+    #print(k)
     tk = t[k]
     n = k[1].tolist()
     d = defaultdict(lambda: len(d))
     ids = np.array([d[x] for x in n])
-    print(ids)
     try:
         l = np.max(ids) + 1
     except:
         return 1, 1, 1, 1, 1, 1
     origin_distances = points[k] - O[k[1]]
     k = np.column_stack((k[1], k[0], ids))
-    print(k)
     true_points = np.full((l, 3), np.inf)
     normals = np.zeros((l, 3))
     hits = np.zeros(l)
@@ -190,7 +187,7 @@ def cast_ray(world, O, D, depth, geometry):
 
 def main():
     np.random.seed(3)
-    number_of_rays = 500
+    number_of_rays = 3000 #show 300
     O = np.zeros(number_of_rays * 3).reshape(number_of_rays, 3)
     O.T[1] = 20
     D = np.random.rand(number_of_rays * 3).reshape(number_of_rays, 3)
@@ -215,9 +212,4 @@ def main():
 
 
 
-lp = LineProfiler()
-lp_wrapper = lp(main)
-lp.add_function(cast_ray)  # add additional function to profile
-lp.add_function(improved_ray_splat_intersection)
-lp_wrapper()
-lp.print_stats()
+main()
