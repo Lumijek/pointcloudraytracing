@@ -69,11 +69,11 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
     c = 0
     while True:
         i += 1
-        if i % 2 == 0:
+        if i % 10000 == 0:
             c += 1
             s = np.sum(activated)
             print(s, i)
-            if s > 20000:
+            if s > 8000000:
                 break
             if c == 200:
                 break
@@ -115,7 +115,6 @@ def improved_ray_splat_intersection(O, D, world, depth):
     distances_squared = np.sum(np.square(distances), axis=2)
     distances_squared[distances_squared > radius_squared[:, None]] = np.inf
     k = np.where(distances_squared != np.inf)
-    print(np.sum(world.radius) / world.radius.size)
     #print(k)
     tk = t[k]
     n = k[1].tolist()
@@ -187,13 +186,13 @@ def cast_ray(world, O, D, depth, geometry):
 
 def main():
     np.random.seed(3)
-    number_of_rays = 3000 #show 300
+    number_of_rays = 1000 #show 300
     O = np.zeros(number_of_rays * 3).reshape(number_of_rays, 3)
     O.T[1] = 20
     D = np.random.rand(number_of_rays * 3).reshape(number_of_rays, 3)
     D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
     threshold = 1
-    perc = 5
+    perc = 0.8
     file_name = "pointclouds/san.ply"
     pcd = o3d.io.read_point_cloud(file_name)
     points = np.asarray(pcd.points)
