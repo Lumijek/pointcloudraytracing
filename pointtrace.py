@@ -9,6 +9,7 @@ from pprint import pprint
 import sys
 import pdb
 from collections import defaultdict
+import scipy
 
 
 def nprint(var):
@@ -56,7 +57,7 @@ def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     )
 
     [k, idx, _] = pcd_tree.search_radius_vector_3d(point, radius * perc)
-    np.asarray(pcd.colors)[idx, :] = [0, 1, 1]  # Convert all relevant points to blue.
+    #np.asarray(pcd.colors)[idx, :] = [0, 1, 1]  # Convert all relevant points to blue.
     s = np.size(activated[idx]) - np.count_nonzero(activated[idx])
     activated[idx] = True
     return Splat(center, normal, radius, points)
@@ -73,7 +74,7 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
             c += 1
             s = np.sum(activated)
             print(s, i)
-            if s > 8000000:
+            if s > 500000:
                 break
             if c == 200:
                 break
@@ -111,11 +112,9 @@ def improved_ray_splat_intersection(O, D, world, depth):
     t[t < 0] = np.inf
     points = O + np.einsum("ij, jl->ijl", t, D)
     distances = center[:, None] - points
-    # distances = points - O
     distances_squared = np.sum(np.square(distances), axis=2)
     distances_squared[distances_squared > radius_squared[:, None]] = np.inf
     k = np.where(distances_squared != np.inf)
-    #print(k)
     tk = t[k]
     n = k[1].tolist()
     d = defaultdict(lambda: len(d))
@@ -141,7 +140,7 @@ def improved_ray_splat_intersection(O, D, world, depth):
             hits[cid] = tk[i]
             inds[cid] = r
     ls = create_lineset(O[inds], true_points, depth)
-    ns = create_lineset(true_points, true_points + normals * 30, 100)
+    ns = create_lineset(world.center, world.center + world.normal, 100)
     return true_points, D[inds], normals, hits, ls, ns
 
 
@@ -173,39 +172,49 @@ def cast_ray(world, O, D, depth, geometry):
     if type(O) == int:
         return geometry
     geometry.append(line_set)
-    geometry.append(normal_set)
+    #geometry.append(normal_set)
     bad_normals = np.where(np.sum(D * normals, axis=1) > 0)[
         0
     ]  # If ray and normal are on same side(dot product > 0) make the normal negative
     normals[bad_normals] = -normals[bad_normals]
     reflected = D - 2 * np.sum(D * normals, axis=1)[:, None] * normals
-    O += reflected * 1.3
+    O += reflected * 0.1
     cast_ray(world, O, reflected, depth - 1, geometry)
     return geometry
 
 
 def main():
+    pcd2 = o3d.geometry.PointCloud()
+    file_name = "pointclouds/car_cart4.mat"
+    other_points = scipy.io.loadmat(file_name)['car_cart'] + [-10, 2, 5]
+
+    pcd2.points = o3d.utility.Vector3dVector(other_points)
     np.random.seed(3)
-    number_of_rays = 1000 #show 300
+    number_of_rays = 100 #show 300
     O = np.zeros(number_of_rays * 3).reshape(number_of_rays, 3)
-    O.T[1] = 20
-    D = np.random.rand(number_of_rays * 3).reshape(number_of_rays, 3)
+    O.T[1] = 5
+    D = -np.random.rand(number_of_rays * 3).reshape(number_of_rays, 3)
     D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
-    threshold = 1
-    perc = 0.8
-    file_name = "pointclouds/san.ply"
+    threshold = 0.5
+    perc = 0.3
+    file_name = "pointclouds/atk_back.pcd"
     pcd = o3d.io.read_point_cloud(file_name)
     points = np.asarray(pcd.points)
     points += np.random.normal(0, 0.000001, points.shape)
+    points = np.vstack((points, other_points))
     pcd.points = o3d.utility.Vector3dVector(points)
+
+
     pcd_tree = o3d.geometry.KDTreeFlann(pcd)
+
     world = World()
     create_splats(world, pcd, pcd_tree, 100, threshold, perc, points)
     world.construct_world_splat()
     # ray_splat_intersection(O, D, world)
     c = []
-    ls = cast_ray(world, O, D, 2, c)
+    ls = cast_ray(world, O, D, 5, c)
     ls.append(pcd)
+    ls.append(pcd2)
     o3d.visualization.draw_geometries(ls)
 
 
