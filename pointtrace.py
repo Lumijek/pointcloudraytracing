@@ -1,24 +1,20 @@
 import open3d as o3d
-from ray import Ray
-from vec3 import Vec3, Color
 import numpy as np
 from line_profiler import LineProfiler
 from time import perf_counter
 from splat import Splat, World
-from pprint import pprint
 import sys
-import pdb
 from collections import defaultdict
 import scipy
+import time
 
-
-def nprint(var):
-    print(var)
-    print("\n--------------------------------------------------------\n")
-
-
-np.set_printoptions(threshold=10000)
-
+M_FACTOR = 0.1
+PERC = 0.3
+THRESHOLD = 0.5
+NUMBER_OF_POINTS = 61000
+NUMBER_OF_RAYS = 500
+DEPTH = 5
+SPLAT_SIZE = 100
 
 def fitPLaneLTSQ(XYZ):
     [rows, cols] = XYZ.shape
@@ -73,11 +69,10 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
         if i % 10000 == 0:
             c += 1
             s = np.sum(activated)
-            print(s, i)
-            if s > 500000:
+            print("Points covered:", s, ", Splats:", i)
+            if s > NUMBER_OF_POINTS:
                 break
-            if c == 200:
-                break
+
         p = np.random.choice(available_indices)
         c_splat = generate_splat(
             pcd, pcd_tree, pcd.points[p], k, threshold, perc, points, activated
@@ -171,6 +166,7 @@ def cast_ray(world, O, D, depth, geometry):
     O, D, normals, t, line_set, normal_set = improved_ray_splat_intersection(O, D, world, depth)
     if type(O) == int:
         return geometry
+    #print(O,"\n\n\n\n", D)
     geometry.append(line_set)
     #geometry.append(normal_set)
     bad_normals = np.where(np.sum(D * normals, axis=1) > 0)[
@@ -178,44 +174,61 @@ def cast_ray(world, O, D, depth, geometry):
     ]  # If ray and normal are on same side(dot product > 0) make the normal negative
     normals[bad_normals] = -normals[bad_normals]
     reflected = D - 2 * np.sum(D * normals, axis=1)[:, None] * normals
-    O += reflected * 0.1
+    O += reflected * M_FACTOR
     cast_ray(world, O, reflected, depth - 1, geometry)
-    return geometry
 
 
 def main():
+
+    np.random.seed(0)
     pcd2 = o3d.geometry.PointCloud()
     file_name = "pointclouds/car_cart4.mat"
     other_points = scipy.io.loadmat(file_name)['car_cart'] + [-10, 2, 5]
 
     pcd2.points = o3d.utility.Vector3dVector(other_points)
-    np.random.seed(3)
-    number_of_rays = 100 #show 300
-    O = np.zeros(number_of_rays * 3).reshape(number_of_rays, 3)
+
+
+    O = np.zeros(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
     O.T[1] = 5
-    D = -np.random.rand(number_of_rays * 3).reshape(number_of_rays, 3)
+    O.T[2] = 10
+    D = -np.random.rand(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
     D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
-    threshold = 0.5
-    perc = 0.3
+    '''
     file_name = "pointclouds/atk_back.pcd"
     pcd = o3d.io.read_point_cloud(file_name)
     points = np.asarray(pcd.points)
     points += np.random.normal(0, 0.000001, points.shape)
     points = np.vstack((points, other_points))
     pcd.points = o3d.utility.Vector3dVector(points)
+    '''
 
 
-    pcd_tree = o3d.geometry.KDTreeFlann(pcd)
+    pcd_tree = o3d.geometry.KDTreeFlann(pcd2)
 
     world = World()
-    create_splats(world, pcd, pcd_tree, 100, threshold, perc, points)
+    create_splats(world, pcd2, pcd_tree, 100, THRESHOLD, PERC, other_points)
     world.construct_world_splat()
     # ray_splat_intersection(O, D, world)
-    c = []
-    ls = cast_ray(world, O, D, 5, c)
-    ls.append(pcd)
-    ls.append(pcd2)
-    o3d.visualization.draw_geometries(ls)
+    geometries = []
+    cast_ray(world, O, D, 1, geometries)
+    #geometries.append(pcd)
+    geometries.append(pcd2)
+    o3d.visualization.draw_geometries(geometries)
+
+
+    #PRINT HYPERPARAMETERS AND STATS:
+    print("\n\nHyperparameters: ")
+    print("_____________________________")
+    print("Perc:", PERC)
+    print("Threshold:", THRESHOLD)
+    print("Number of points:", NUMBER_OF_POINTS)
+    print("Number of rays:", NUMBER_OF_RAYS)
+    print("Depth:", DEPTH)
+    print("Splat Size", SPLAT_SIZE)
+    print("\nOther stats:")
+    print("Time taken to generate splats: ", splat_time)
+    print("Time taken to generate rays: ", ray_time)
+    print("Total splats generated: ", len(world.splats))
 
 
 
