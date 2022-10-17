@@ -11,8 +11,8 @@ import time
 M_FACTOR = 0.1
 PERC = 0.3
 THRESHOLD = 0.5
-NUMBER_OF_POINTS = 100_000
-NUMBER_OF_RAYS = 1000
+NUMBER_OF_POINTS = 300_000
+NUMBER_OF_RAYS = 3000
 DEPTH = 5
 SPLAT_SIZE = 100
 
@@ -28,6 +28,7 @@ def fitPLaneLTSQ(XYZ):
     normal = normal / nn
     return normal
 
+@profile
 def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     [k, idx, _] = pcd_tree.search_knn_vector_3d(point, k)
     found_points = points[idx]
@@ -54,6 +55,7 @@ def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     return Splat(center, normal, radius, points)
 
 
+@profile
 def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
     activated = np.full(len(points), False)
     available_indices = np.where(activated == 0)[0]
@@ -74,14 +76,13 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
         )
         world.add_splat(c_splat)
 
-
+@profile
 def test_sink_hit(O, D, scene):
     rays = o3d.core.Tensor(np.hstack((O, D)),
                            dtype=o3d.core.Dtype.Float32)
     ans = scene.cast_rays(rays)
     hits = ans['t_hit'].numpy()
     sink_indexes = np.where(hits != np.inf)[0]
-    #print(sink_indexes)
     O_new = O[sink_indexes]
     D_new = D[sink_indexes]
     t = hits[sink_indexes]
@@ -91,7 +92,7 @@ def test_sink_hit(O, D, scene):
     else:
         return create_lineset(np.array([[0, 0, 0]]), np.array([[0, 0, 0]]), 0) #Fake lineset cuz im too lazy to add testing
 
-
+@profile
 def improved_ray_splat_intersection(O, D, world, depth, scene):
     center = world.center
     normal = world.normal
@@ -156,14 +157,13 @@ def create_lineset(O, H, depth):
     line_set.colors = o3d.utility.Vector3dVector(colors)
     return line_set
 
-
+@profile
 def cast_ray(world, O, D, depth, geometry, scene):
     if depth == 0:
         return geometry
     O, D, normals, t, line_set, normal_set, hit_line_set = improved_ray_splat_intersection(O, D, world, depth, scene)
     if type(O) == int:
         return geometry
-    print(hit_line_set.points)
     geometry.append(line_set)
     geometry.append(hit_line_set)
     #geometry.append(normal_set)
@@ -189,6 +189,10 @@ def add_sink(world, geometries, radius=1.0, center=[-12, 2, 10]):
     geometries.append(mesh_sphere)
     return scene
 
+def batch(other_points, ray_num, geometries):
+    pass
+
+@profile
 def main():
 
     np.random.seed(0)
@@ -234,9 +238,10 @@ def main():
     scene = add_sink(world, geometries)
     create_splats(world, pcd2, pcd_tree, 100, THRESHOLD, PERC, other_points)
     world.construct_world_splat()
-
-
-    lh = cast_ray(world, O, D, 2, geometries, scene)
+    bs = 500
+    for i in range(6):
+        print(i)
+        lh = cast_ray(world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], 2, geometries, scene)
     #geometries.append(pcd)
     geometries.append(pcd2)
     #geometries.append(lh)
