@@ -6,15 +6,35 @@ from splat import *
 import sys
 from collections import defaultdict
 import scipy
+import math
 import time
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 M_FACTOR = 0.1
 PERC = 0.3
 THRESHOLD = 0.5
-NUMBER_OF_POINTS = 300_000
-NUMBER_OF_RAYS = 3000
-DEPTH = 5
+NUMBER_OF_POINTS = 200_000
+NUMBER_OF_RAYS = 1000
+DEPTH = 2
 SPLAT_SIZE = 100
+
+
+def rotation_matrix(axis, theta):
+    """
+    Return the rotation matrix associated with counterclockwise rotation about
+    the given axis by theta radians.
+    """
+    axis = np.asarray(axis)
+    axis = axis / math.sqrt(np.dot(axis, axis))
+    a = math.cos(theta / 2.0)
+    b, c, d = -axis * math.sin(theta / 2.0)
+    aa, bb, cc, dd = a * a, b * b, c * c, d * d
+    bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
+    return np.array([[aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
+                     [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
+                     [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
+
 
 def fitPLaneLTSQ(XYZ):
     [rows, cols] = XYZ.shape
@@ -28,7 +48,6 @@ def fitPLaneLTSQ(XYZ):
     normal = normal / nn
     return normal
 
-@profile
 def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     [k, idx, _] = pcd_tree.search_knn_vector_3d(point, k)
     found_points = points[idx]
@@ -55,7 +74,6 @@ def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     return Splat(center, normal, radius, points)
 
 
-@profile
 def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
     activated = np.full(len(points), False)
     available_indices = np.where(activated == 0)[0]
@@ -66,7 +84,7 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
         if i % 10000 == 0:
             c += 1
             s = np.sum(activated)
-            print("Points covered:", s, ", Splats:", i)
+            #print("Points covered:", s, ", Splats:", i)
             if s > NUMBER_OF_POINTS:
                 break
 
@@ -76,30 +94,33 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
         )
         world.add_splat(c_splat)
 
-@profile
-def test_sink_hit(O, D, scene):
+def test_sink_hit(O, D, scene, geometry, returns):
     rays = o3d.core.Tensor(np.hstack((O, D)),
                            dtype=o3d.core.Dtype.Float32)
     ans = scene.cast_rays(rays)
     hits = ans['t_hit'].numpy()
     sink_indexes = np.where(hits != np.inf)[0]
+    non_sink_indexes = np.where(hits == np.inf)[0]
     O_new = O[sink_indexes]
     D_new = D[sink_indexes]
     t = hits[sink_indexes]
     if(t.size > 0):
         H = O_new + D_new * t[:, None]
-        return create_lineset(O_new, H, 100) #100 to cha
+        l = create_lineset(O_new, H, 100)
+        geometry.append(l)
+        returns[0] += t.size
+        return O[non_sink_indexes], D[non_sink_indexes]
     else:
-        return create_lineset(np.array([[0, 0, 0]]), np.array([[0, 0, 0]]), 0) #Fake lineset cuz im too lazy to add testing
+        return O, D
 
-@profile
-def improved_ray_splat_intersection(O, D, world, depth, scene):
+def improved_ray_splat_intersection(O, D, world, depth, scene, geometry, returns):
+
     center = world.center
     normal = world.normal
     radius = world.radius
     radius_squared = world.radius_squared
-
-    hls = test_sink_hit(O, D, scene) # hit line set 
+    if(depth != DEPTH):
+        O, D = test_sink_hit(O, D, scene, geometry, returns) # hit line set 
     denoms = normal.dot(D.T)
     t = np.einsum("ijk, ik->ij", (center[:, None] - O), normal) / denoms
     t[t < 0] = np.inf
@@ -107,21 +128,25 @@ def improved_ray_splat_intersection(O, D, world, depth, scene):
     distances = center[:, None] - points
     distances_squared = np.sum(np.square(distances), axis=2)
     distances_squared[distances_squared > radius_squared[:, None]] = np.inf
+
     k = np.where(distances_squared != np.inf)
     tk = t[k]
     n = k[1].tolist()
     d = defaultdict(lambda: len(d))
     ids = np.array([d[x] for x in n])
+
     try:
         l = np.max(ids) + 1
     except:
         return 1, 1, 1, 1, 1, 1
+
     origin_distances = points[k] - O[k[1]]
     k = np.column_stack((k[1], k[0], ids))
     true_points = np.full((l, 3), np.inf)
     normals = np.zeros((l, 3))
     hits = np.zeros(l)
     inds = np.zeros(l, dtype=int)
+
     for i in range(len(k)):
         r, s, cid = k[i]
         current_distance = true_points[cid] - O[r]
@@ -134,7 +159,7 @@ def improved_ray_splat_intersection(O, D, world, depth, scene):
             inds[cid] = r
     ls = create_lineset(O[inds], true_points, depth)
     ns = create_lineset(center, center + normal, depth)
-    return true_points, D[inds], normals, hits, ls, ns, hls
+    return true_points, D[inds], normals, hits, ls, ns
 
 
 def create_lineset(O, H, depth):
@@ -157,24 +182,22 @@ def create_lineset(O, H, depth):
     line_set.colors = o3d.utility.Vector3dVector(colors)
     return line_set
 
-@profile
-def cast_ray(world, O, D, depth, geometry, scene):
+def cast_ray(world, O, D, depth, geometry, scene, returns):
     if depth == 0:
         return geometry
-    O, D, normals, t, line_set, normal_set, hit_line_set = improved_ray_splat_intersection(O, D, world, depth, scene)
+    O, D, normals, t, line_set, normal_set = improved_ray_splat_intersection(O, D, world, depth, scene, geometry, returns)
     if type(O) == int:
         return geometry
-    geometry.append(line_set)
-    geometry.append(hit_line_set)
+    #geometry.append(line_set)
     #geometry.append(normal_set)
     bad_normals = np.where(np.sum(D * normals, axis=1) > 0)[
         0
     ]  # If ray and normal are on same side(dot product > 0) make the normal negative
     normals[bad_normals] = -normals[bad_normals]
     reflected = D - 2 * np.sum(D * normals, axis=1)[:, None] * normals
-    #O += reflected * M_FACTOR
+    O += reflected * M_FACTOR
     last_hit = create_lineset(O, O + reflected * 0.5, 100)
-    cast_ray(world, O, reflected, depth - 1, geometry, scene)
+    cast_ray(world, O, reflected, depth - 1, geometry, scene, returns)
     return last_hit
 
 def add_sink(world, geometries, radius=1.0, center=[-12, 2, 10]):
@@ -192,62 +215,79 @@ def add_sink(world, geometries, radius=1.0, center=[-12, 2, 10]):
 def batch(other_points, ray_num, geometries):
     pass
 
-@profile
 def main():
 
-    np.random.seed(0)
-    pcd2 = o3d.geometry.PointCloud()
-    file_name = "pointclouds/car_cart4.mat"
-    other_points = scipy.io.loadmat(file_name)['car_cart'] + [-10, 2, 5]
-    end_points = other_points[np.random.choice(len(other_points), size=NUMBER_OF_RAYS, replace=False)]
 
-    pcd2.points = o3d.utility.Vector3dVector(other_points)
+    axis = [0, 0, 1]
+    #np.random.seed(0)
+    hit_list = []
+    for epochs in tqdm(range(0, 181)):
+        theta = math.radians(epochs)
+
+        pcd2 = o3d.geometry.PointCloud()
+        file_name = "pointclouds/car_cart4.mat"
+        other_points = scipy.io.loadmat(file_name)['car_cart']
+        other_points += np.random.normal(0, 0.000001, other_points.shape)
+        other_points = np.dot(rotation_matrix(axis, theta), other_points.T).T
+
+        end_points = other_points[np.random.choice(len(other_points), size=NUMBER_OF_RAYS, replace=False)]
+
+        pcd2.points = o3d.utility.Vector3dVector(other_points)
 
 
-    O = np.zeros(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
-    O.T[1] = 5
-    O.T[2] = 8
-    D = end_points - O
-    D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
+        O = np.zeros(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
+        O.T[0] = 5.0
+        O.T[1] = 0.0
+        O.T[2] = 0.5
+        D = end_points - O
+        D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
 
-    '''
-    D = -np.random.rand(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
-    D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
+        '''
+        D = -np.random.rand(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
+        D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
 
-    O = np.zeros(3).reshape(1, 3)
-    O.T[1] = 5
-    O.T[2] = 10
-    D = np.array([[-0.82650114, -0.3520768, -0.43924685]])
-    '''
+        O = np.zeros(3).reshape(1, 3)
+        O.T[1] = 5
+        O.T[2] = 10
+        D = np.array([[-0.82650114, -0.3520768, -0.43924685]])
+        '''
 
-    '''
-    file_name = "pointclouds/atk_back.pcd"
-    pcd = o3d.io.read_point_cloud(file_name)
-    points = np.asarray(pcd.points)
-    points += np.random.normal(0, 0.000001, points.shape)
-    points = np.vstack((points, other_points))
-    pcd.points = o3d.utility.Vector3dVector(points)
+        '''
+        file_name = "pointclouds/atk_back.pcd"
+        pcd = o3d.io.read_point_cloud(file_name)
+        points = np.asarray(pcd.points)
+        points += np.random.normal(0, 0.000001, points.shape)
+        points = np.vstack((points, other_points))
+        pcd.points = o3d.utility.Vector3dVector(points)
 
-    '''
-    geometries = []
+        '''
+        geometries = []
 
-    pcd_tree = o3d.geometry.KDTreeFlann(pcd2)
+        pcd_tree = o3d.geometry.KDTreeFlann(pcd2)
 
-    world = World()
+        world = World()
 
-    scene = add_sink(world, geometries)
-    create_splats(world, pcd2, pcd_tree, 100, THRESHOLD, PERC, other_points)
-    world.construct_world_splat()
-    bs = 500
-    for i in range(6):
-        print(i)
-        lh = cast_ray(world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], 2, geometries, scene)
+        scene = add_sink(world, geometries, center=O[1])
+        create_splats(world, pcd2, pcd_tree, 100, THRESHOLD, PERC, other_points)
+        world.construct_world_splat()
+
+        batches = 2
+        bs = NUMBER_OF_RAYS // batches
+        returns = [0]
+        for i in range(batches):
+            lh = cast_ray(world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], DEPTH, geometries, scene, returns)
+        hit_list.append((epochs, returns[0] / NUMBER_OF_RAYS))
+
+    x, y = zip(*hit_list)
+    plt.plot(x, y)
+    plt.title('Degrees vs Hit Percentage')
+    plt.xlabel('Degrees')
+    plt.ylabel('Hit Percentage')
+    plt.show()
     #geometries.append(pcd)
     geometries.append(pcd2)
     #geometries.append(lh)
     o3d.visualization.draw_geometries(geometries)
-
-
     #PRINT HYPERPARAMETERS AND STATS:
     print("\n\nHyperparameters: ")
     print("_____________________________")
