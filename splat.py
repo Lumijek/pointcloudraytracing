@@ -9,10 +9,16 @@ class Splat:
         self.radius_squared = radius * radius
         self.points = points
 
+class Sphere:
+    def __init__(self, center, radius):
+        self.center = center
+        self.radius = radius
+
 
 class World:
     def __init__(self):
         self.splats = []
+        self.sink = None
 
     def add_splat(self, splat):
         self.splats.append(splat)

@@ -10,12 +10,13 @@ import math
 import time
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from math import sqrt, sin, cos, pi
 
 M_FACTOR = 0.1
 PERC = 0.3
 THRESHOLD = 0.5
-NUMBER_OF_POINTS = 200_000
-NUMBER_OF_RAYS = 1000
+NUMBER_OF_POINTS = 250_000
+NUMBER_OF_RAYS = 2000
 DEPTH = 2
 SPLAT_SIZE = 100
 
@@ -84,7 +85,7 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
         if i % 10000 == 0:
             c += 1
             s = np.sum(activated)
-            #print("Points covered:", s, ", Splats:", i)
+            print("Points covered:", s, ", Splats:", i)
             if s > NUMBER_OF_POINTS:
                 break
 
@@ -188,11 +189,9 @@ def cast_ray(world, O, D, depth, geometry, scene, returns):
     O, D, normals, t, line_set, normal_set = improved_ray_splat_intersection(O, D, world, depth, scene, geometry, returns)
     if type(O) == int:
         return geometry
-    #geometry.append(line_set)
+    geometry.append(line_set)
     #geometry.append(normal_set)
-    bad_normals = np.where(np.sum(D * normals, axis=1) > 0)[
-        0
-    ]  # If ray and normal are on same side(dot product > 0) make the normal negative
+    bad_normals = np.where(np.sum(D * normals, axis=1) > 0)[0]  # If ray and normal are on same side(dot product > 0) make the normal negative
     normals[bad_normals] = -normals[bad_normals]
     reflected = D - 2 * np.sum(D * normals, axis=1)[:, None] * normals
     O += reflected * M_FACTOR
@@ -215,75 +214,89 @@ def add_sink(world, geometries, radius=1.0, center=[-12, 2, 10]):
 def batch(other_points, ray_num, geometries):
     pass
 
+
+
+def sunflower(x, n, r_fac, alpha=0, geodesic=False):
+    phi = (1 + sqrt(5)) / 2  # golden ratio
+
+    points = []
+    angle_stride = 360 * phi if geodesic else 2 * pi / phi ** 2
+    b = round(alpha * sqrt(n))  # number of boundary points
+    for k in range(1, n + 1):
+        r = radius(k, n, b)
+        theta = k * angle_stride
+        points.append([x, r_fac * r * cos(theta), r_fac * r * sin(theta)])
+    return points
+
+def radius(k, n, b):
+    if k > n - b:
+        return 1.0
+    else:
+        return sqrt(k - 0.5) / sqrt(n - (b + 1) / 2)
+
 def main():
-
-
+    center = [-1, 0, 0]
     axis = [0, 0, 1]
-    #np.random.seed(0)
-    hit_list = []
-    for epochs in tqdm(range(0, 181)):
-        theta = math.radians(epochs)
+    theta = math.radians(90)
 
-        pcd2 = o3d.geometry.PointCloud()
-        file_name = "pointclouds/car_cart4.mat"
-        other_points = scipy.io.loadmat(file_name)['car_cart']
-        other_points += np.random.normal(0, 0.000001, other_points.shape)
-        other_points = np.dot(rotation_matrix(axis, theta), other_points.T).T
+    pcd2 = o3d.geometry.PointCloud()
+    file_name = "pointclouds/car_cart4.mat"
+    other_points = scipy.io.loadmat(file_name)['car_cart']
+    other_points += np.random.normal(0, 0.000001, other_points.shape)
+    other_points = np.dot(rotation_matrix(axis, theta), other_points.T).T
 
-        end_points = other_points[np.random.choice(len(other_points), size=NUMBER_OF_RAYS, replace=False)]
-
-        pcd2.points = o3d.utility.Vector3dVector(other_points)
+    end_points = other_points[np.random.choice(len(other_points), size=NUMBER_OF_RAYS, replace=False)]
+    cent = np.sum(other_points, axis=0) / other_points.shape[0]
+    pcd2.points = o3d.utility.Vector3dVector(other_points)
 
 
-        O = np.zeros(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
-        O.T[0] = 5.0
-        O.T[1] = 0.0
-        O.T[2] = 0.5
-        D = end_points - O
-        D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
+    O = np.zeros(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
+    O.T[0] = 5.0
+    O.T[1] = 0.0
+    O.T[2] = 0.5
+    D = np.array(sunflower(cent[0], NUMBER_OF_RAYS, 2,alpha=0, geodesic=False)) - O
+    D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
 
-        '''
-        D = -np.random.rand(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
-        D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
+    #D = np.array([0.00160762, -0.35566735, 0.58488357] - O[0])
+    #D = np.tile(D, (NUMBER_OF_RAYS, 1))
+    #D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
 
-        O = np.zeros(3).reshape(1, 3)
-        O.T[1] = 5
-        O.T[2] = 10
-        D = np.array([[-0.82650114, -0.3520768, -0.43924685]])
-        '''
+    '''
+    D = -np.random.rand(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
+    D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
 
-        '''
-        file_name = "pointclouds/atk_back.pcd"
-        pcd = o3d.io.read_point_cloud(file_name)
-        points = np.asarray(pcd.points)
-        points += np.random.normal(0, 0.000001, points.shape)
-        points = np.vstack((points, other_points))
-        pcd.points = o3d.utility.Vector3dVector(points)
+    O = np.zeros(3).reshape(1, 3)
+    O.T[1] = 5
+    O.T[2] = 10
+    D = np.array([[-0.82650114, -0.3520768, -0.43924685]])
+    '''
 
-        '''
-        geometries = []
+    '''
+    file_name = "pointclouds/atk_back.pcd"
+    pcd = o3d.io.read_point_cloud(file_name)
+    points = np.asarray(pcd.points)
+    points += np.random.normal(0, 0.000001, points.shape)
+    points = np.vstack((points, other_points))
+    pcd.points = o3d.utility.Vector3dVector(points)
 
-        pcd_tree = o3d.geometry.KDTreeFlann(pcd2)
+    '''
+    geometries = []
 
-        world = World()
+    pcd_tree = o3d.geometry.KDTreeFlann(pcd2)
 
-        scene = add_sink(world, geometries, center=O[1])
-        create_splats(world, pcd2, pcd_tree, 100, THRESHOLD, PERC, other_points)
-        world.construct_world_splat()
+    world = World()
 
-        batches = 2
-        bs = NUMBER_OF_RAYS // batches
-        returns = [0]
-        for i in range(batches):
-            lh = cast_ray(world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], DEPTH, geometries, scene, returns)
-        hit_list.append((epochs, returns[0] / NUMBER_OF_RAYS))
+    scene = add_sink(world, geometries, center=O[1])
+    create_splats(world, pcd2, pcd_tree, 100, THRESHOLD, PERC, other_points)
+    world.construct_world_splat()
 
-    x, y = zip(*hit_list)
-    plt.plot(x, y)
-    plt.title('Degrees vs Hit Percentage')
-    plt.xlabel('Degrees')
-    plt.ylabel('Hit Percentage')
-    plt.show()
+    batches = 4
+    bs = NUMBER_OF_RAYS // batches
+    returns = [0]
+    for i in range(batches):
+        lh = cast_ray(world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], DEPTH, geometries, scene, returns)
+    print(geometries)
+
     #geometries.append(pcd)
     geometries.append(pcd2)
     #geometries.append(lh)
