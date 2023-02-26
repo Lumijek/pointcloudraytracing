@@ -11,16 +11,26 @@ import time
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from math import sqrt, sin, cos, pi
+import multiprocessing as mp
+from functools import partial
 
-M_FACTOR = 0.1
+M_FACTOR = 0.04
 PERC = 0.3
-THRESHOLD = 0.5
-NUMBER_OF_POINTS = 200000
-NUMBER_OF_RAYS = 1000
-DEPTH = 1
-SPLAT_SIZE = 100
+THRESHOLD = 0.3
+NUMBER_OF_POINTS = 6000
+NUMBER_OF_RAYS =  1000
+DEPTH = 3
+SPLAT_SIZE = 30
+SINK_CENTER = [5, 0, 2]
+SINK_RADIUS = 1
 
+class LineSet:
+    def __init__(self, start, end, depth):
+        self.start = start
+        self.end = end
+        self.depth = depth
 
+# taken from stackoverflow
 def rotation_matrix(axis, theta):
     """
     Return the rotation matrix associated with counterclockwise rotation about
@@ -35,7 +45,6 @@ def rotation_matrix(axis, theta):
     return np.array([[aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
                      [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
                      [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
-
 
 def fitPLaneLTSQ(XYZ):
     [rows, cols] = XYZ.shape
@@ -95,11 +104,17 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
         )
         world.add_splat(c_splat)
 
-def test_sink_hit(O, D, scene, geometry, returns):
-    rays = o3d.core.Tensor(np.hstack((O, D)),
-                           dtype=o3d.core.Dtype.Float32)
-    ans = scene.cast_rays(rays)
-    hits = ans['t_hit'].numpy()
+def sphere_intersect(sphere_center, sphere_radius, origin, direction):
+    oc = origin - sphere_center
+    a = np.sum(direction * direction, axis=1)
+    b = 2 * np.sum(oc * direction, axis=1)
+    c = np.sum(oc * oc, axis=1) - sphere_radius * sphere_radius
+    discriminant = b * b - 4 * a * c
+    dist = np.where(discriminant >= 0, (-b - np.sqrt(np.maximum(discriminant, 0))) / (2 * a), np.inf)
+    return dist
+
+def test_sink_hit(O, D, geometry, returns):
+    hits = sphere_intersect(SINK_CENTER, SINK_RADIUS, O, D)
     sink_indexes = np.where(hits != np.inf)[0]
     non_sink_indexes = np.where(hits == np.inf)[0]
     O_new = O[sink_indexes]
@@ -114,20 +129,16 @@ def test_sink_hit(O, D, scene, geometry, returns):
     else:
         return O, D
 
-def improved_ray_splat_intersection(O, D, world, depth, scene, geometry, returns):
+def improved_ray_splat_intersection(O, D, world, depth, geometry, returns):
 
     center = world.center
     normal = world.normal
     radius = world.radius
     radius_squared = world.radius_squared
     if(depth != DEPTH):
-        O, D = test_sink_hit(O, D, scene, geometry, returns) # hit line set 
-
-    # ray plane intersection
+        O, D = test_sink_hit(O, D, geometry, returns) # hit line set 
     denoms = normal.dot(D.T)
     t = np.einsum("ijk, ik->ij", (center[:, None] - O), normal) / denoms
-
-    # make sure the intersection is within radius of the splat
     t[t < 0] = np.inf
     points = O + np.einsum("ij, jl->ijl", t, D)
     distances = center[:, None] - points
@@ -163,13 +174,16 @@ def improved_ray_splat_intersection(O, D, world, depth, scene, geometry, returns
             hits[cid] = tk[i]
             inds[cid] = r
     ls = create_lineset(O[inds], true_points, depth)
-    ns = create_lineset(center, center + normal, depth)
+    ns = None#ns = create_lineset(center, center + normal, depth)
     return true_points, D[inds], normals, hits, ls, ns
 
 
-def create_lineset(O, H, depth):
+def create_lineset(O, H, depth, de=False):
+    if de == False:
+        return LineSet(O, H, depth)
     points = []
     for i in range(O.shape[0]):
+        if (np.sum(np.square(O[i] - H[i])) > 20): continue
         points.append(O[i].tolist())
         points.append(H[i].tolist())
 
@@ -186,11 +200,11 @@ def create_lineset(O, H, depth):
     line_set.lines = o3d.utility.Vector2iVector(lines)
     line_set.colors = o3d.utility.Vector3dVector(colors)
     return line_set
-
-def cast_ray(world, O, D, depth, geometry, scene, returns):
+    
+def cast_ray(world, O, D, depth, geometry, returns):
     if depth == 0:
         return geometry
-    O, D, normals, t, line_set, normal_set = improved_ray_splat_intersection(O, D, world, depth, scene, geometry, returns)
+    O, D, normals, t, line_set, normal_set = improved_ray_splat_intersection(O, D, world, depth, geometry, returns)
     if type(O) == int:
         return geometry
     geometry.append(line_set)
@@ -199,21 +213,17 @@ def cast_ray(world, O, D, depth, geometry, scene, returns):
     normals[bad_normals] = -normals[bad_normals]
     reflected = D - 2 * np.sum(D * normals, axis=1)[:, None] * normals
     O += reflected * M_FACTOR
-    last_hit = create_lineset(O, O + reflected * 0.5, 100)
-    cast_ray(world, O, reflected, depth - 1, geometry, scene, returns)
+    last_hit = create_lineset(O, O + reflected * 0.5, 99)
+    cast_ray(world, O, reflected, depth - 1, geometry, returns)
     return last_hit
 
-def add_sink(world, geometries, radius=1.0, center=[-12, 2, 10]):
+def add_sink(world, geometries, radius=SINK_RADIUS, center=[-12, 2, 10]):
     world.sink = Sphere(center, radius)
     mesh_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=radius).translate(center)
     mesh_sphere.compute_vertex_normals()
     mesh_sphere.paint_uniform_color([0.4, 0.8, 0.3])
 
-    sphere = o3d.t.geometry.TriangleMesh.from_legacy(mesh_sphere)
-    scene = o3d.t.geometry.RaycastingScene()
-    sphere_id = scene.add_triangles(sphere)
     geometries.append(mesh_sphere)
-    return scene
 
 def batch(other_points, ray_num, geometries):
     pass
@@ -238,86 +248,70 @@ def radius(k, n, b):
     else:
         return sqrt(k - 0.5) / sqrt(n - (b + 1) / 2)
 
-def main():
-    np.random.seed(0)
+def add_floor(world):
+    center = np.array([0, 0, 0])
+    normal = np.array([0, 0, 1])
+    radius = 1000
+    floor = Splat(center, normal, radius, None)
+    world.add_splat(floor)
+
+if __name__ == "__main__":
     center = [-1, 0, 0]
     axis = [0, 0, 1]
-    theta = math.radians(90)
+    theta = math.radians(45)
 
-    pcd2 = o3d.geometry.PointCloud()
-    file_name = "pointclouds/car_cart4.mat"
-    other_points = scipy.io.loadmat(file_name)['car_cart']
-    other_points += np.random.normal(0, 0.000001, other_points.shape)
-    other_points = np.dot(rotation_matrix(axis, theta), other_points.T).T
+    #pcd2 = o3d.geometry.PointCloud()
+    file_name = "pointclouds/car_cart4_down_10per.pcd"
+    #other_points = scipy.io.loadmat(file_name)['car_cart']
+    #other_points += np.random.normal(0, 0.000001, other_points.shape)
+    #other_points = np.dot(rotation_matrix(axis, theta), other_points.T).T
 
-    end_points = other_points[np.random.choice(len(other_points), size=NUMBER_OF_RAYS, replace=False)]
+    #end_points = other_points[np.random.choice(len(other_points), size=NUMBER_OF_RAYS, replace=False)]
+    #cent = np.sum(other_points, axis=0) / other_points.shape[0]
+    #pcd2.points = o3d.utility.Vector3dVector(other_points)
+    pcd2 = o3d.io.read_point_cloud(file_name)
+    other_points = np.asarray(pcd2.points)
     cent = np.sum(other_points, axis=0) / other_points.shape[0]
-    pcd2.points = o3d.utility.Vector3dVector(other_points)
-
 
     O = np.zeros(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
-    O.T[0] = 5.0
-    O.T[1] = 0.0
-    O.T[2] = 0.5
+    O.T[0] = SINK_CENTER[0]
+    O.T[1] = SINK_CENTER[1]
+    O.T[2] = SINK_CENTER[2]
     D = np.array(sunflower(cent[0], NUMBER_OF_RAYS, 2,alpha=0, geodesic=False)) - O
     D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
-
-    #D = np.array([0.00160762, -0.35566735, 0.58488357] - O[0])
-    #D = np.tile(D, (NUMBER_OF_RAYS, 1))
-    #D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
-
-    '''
-    D = -np.random.rand(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
-    D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
-
-    O = np.zeros(3).reshape(1, 3)
-    O.T[1] = 5
-    O.T[2] = 10
-    D = np.array([[-0.82650114, -0.3520768, -0.43924685]])
-    '''
-
-    '''
-    file_name = "pointclouds/atk_back.pcd"
-    pcd = o3d.io.read_point_cloud(file_name)
-    points = np.asarray(pcd.points)
-    points += np.random.normal(0, 0.000001, points.shape)
-    points = np.vstack((points, other_points))
-    pcd.points = o3d.utility.Vector3dVector(points)
-
-    '''
-    geometries = []
+    g1 = []
 
     pcd_tree = o3d.geometry.KDTreeFlann(pcd2)
 
     world = World()
 
-    scene = add_sink(world, geometries, center=O[1])
-    create_splats(world, pcd2, pcd_tree, 100, THRESHOLD, PERC, other_points)
+    add_sink(world, g1, center=O[1])
+    create_splats(world, pcd2, pcd_tree, SPLAT_SIZE, THRESHOLD, PERC, other_points)
+    #add_floor(world)
     world.construct_world_splat()
 
     batches = 1
     bs = NUMBER_OF_RAYS // batches
-    returns = [0]
+
+
+    manager = mp.Manager()
+    geometries = manager.list()
+    returns = manager.list()
+    returns.append(0)
+    params = []
     for i in range(batches):
-        lh = cast_ray(world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], DEPTH, geometries, scene, returns)
-    print(geometries)
+        params.append((world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], DEPTH, geometries, returns))
+
+    with mp.Pool() as pool:
+        ret = pool.starmap(cast_ray, params)
+
+    geometries_true = []
+    for ls in geometries:
+        geometries_true.append(create_lineset(ls.start, ls.end, ls.depth, de=True))
+    geometries_true.append(pcd2)
+    geometries_true.append(g1[0])
     print(returns[0])
+    #mesh_box = o3d.geometry.TriangleMesh.create_box(width=30.0, height=30.0, depth=0.01).translate((-10, -10, -0.02))
+    #geometries_true.append(mesh_box)
+    o3d.visualization.draw_geometries(geometries_true)
 
-    #geometries.append(pcd)
-    geometries.append(pcd2)
-    #geometries.append(lh)
-    o3d.visualization.draw_geometries(geometries)
-    #PRINT HYPERPARAMETERS AND STATS:
-    print("\n\nHyperparameters: ")
-    print("_____________________________")
-    print("Perc:", PERC)
-    print("Threshold:", THRESHOLD)
-    print("Number of points:", NUMBER_OF_POINTS)
-    print("Number of rays:", NUMBER_OF_RAYS)
-    print("Depth:", DEPTH)
-    print("Splat Size", SPLAT_SIZE)
-    print("\nOther stats:")
-    print("Total splats generated: ", len(world.splats))
-
-
-main()
