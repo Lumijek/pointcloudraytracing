@@ -17,11 +17,11 @@ from functools import partial
 M_FACTOR = 0.04
 PERC = 0.3
 THRESHOLD = 0.3
-NUMBER_OF_POINTS = 6000
+NUMBER_OF_POINTS = 100_000
 NUMBER_OF_RAYS =  1000
 DEPTH = 3
-SPLAT_SIZE = 30
-SINK_CENTER = [5, 0, 2]
+SPLAT_SIZE = 100
+SINK_CENTER = [5, 0, 0.0001]
 SINK_RADIUS = 1
 
 class LineSet:
@@ -113,7 +113,7 @@ def sphere_intersect(sphere_center, sphere_radius, origin, direction):
     dist = np.where(discriminant >= 0, (-b - np.sqrt(np.maximum(discriminant, 0))) / (2 * a), np.inf)
     return dist
 
-def test_sink_hit(O, D, geometry, returns):
+def test_sink_hit(O, D, geometry, returns, depth):
     hits = sphere_intersect(SINK_CENTER, SINK_RADIUS, O, D)
     sink_indexes = np.where(hits != np.inf)[0]
     non_sink_indexes = np.where(hits == np.inf)[0]
@@ -121,10 +121,12 @@ def test_sink_hit(O, D, geometry, returns):
     D_new = D[sink_indexes]
     t = hits[sink_indexes]
     if(t.size > 0):
+        print(t.size)
         H = O_new + D_new * t[:, None]
-        l = create_lineset(O_new, H, 100)
-        geometry.append(l)
-        returns[0] += t.size
+        if depth == 1:
+            l = create_lineset(O_new, H, 100)
+            geometry.append(l)
+            returns[0] += t.size
         return O[non_sink_indexes], D[non_sink_indexes]
     else:
         return O, D
@@ -136,7 +138,7 @@ def improved_ray_splat_intersection(O, D, world, depth, geometry, returns):
     radius = world.radius
     radius_squared = world.radius_squared
     if(depth != DEPTH):
-        O, D = test_sink_hit(O, D, geometry, returns) # hit line set 
+        O, D = test_sink_hit(O, D, geometry, returns, depth) # hit line set 
     denoms = normal.dot(D.T)
     t = np.einsum("ijk, ik->ij", (center[:, None] - O), normal) / denoms
     t[t < 0] = np.inf
@@ -207,7 +209,7 @@ def cast_ray(world, O, D, depth, geometry, returns):
     O, D, normals, t, line_set, normal_set = improved_ray_splat_intersection(O, D, world, depth, geometry, returns)
     if type(O) == int:
         return geometry
-    geometry.append(line_set)
+    #geometry.append(line_set)
     #geometry.append(normal_set)
     bad_normals = np.where(np.sum(D * normals, axis=1) > 0)[0]  # If ray and normal are on same side(dot product > 0) make the normal negative
     normals[bad_normals] = -normals[bad_normals]
@@ -218,6 +220,7 @@ def cast_ray(world, O, D, depth, geometry, returns):
     return last_hit
 
 def add_sink(world, geometries, radius=SINK_RADIUS, center=[-12, 2, 10]):
+    print(center, radius)
     world.sink = Sphere(center, radius)
     mesh_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=radius).translate(center)
     mesh_sphere.compute_vertex_normals()
@@ -249,48 +252,68 @@ def radius(k, n, b):
         return sqrt(k - 0.5) / sqrt(n - (b + 1) / 2)
 
 def add_floor(world):
-    center = np.array([0, 0, 0])
+    center = np.array([0, 0, -1])
     normal = np.array([0, 0, 1])
     radius = 1000
     floor = Splat(center, normal, radius, None)
     world.add_splat(floor)
 
+def load_pcd(file_name, theta=0, axis=[0, 0, 1]):
+    pcd = o3d.io.read_point_cloud(file_name)
+    points = np.asarray(pcd.points)
+    points = mat_file[list(mat_file.keys())[-1]]
+    points += np.random.normal(0, 0.000001, points.shape)
+    points = np.dot(rotation_matrix(axis, theta), points.T).T
+    pcd.points = o3d.utility.Vector3dVector(points)
+    return pcd, points
+
+def load_mat(file_name, theta=0, axis=[0, 0, 1]):
+    pcd = o3d.geometry.PointCloud()
+    mat_file = scipy.io.loadmat(file_name)
+    points = mat_file[list(mat_file.keys())[-1]]
+    points += np.random.normal(0, 0.000001, points.shape)
+    points = np.dot(rotation_matrix(axis, theta), points.T).T
+    pcd.points = o3d.utility.Vector3dVector(points)
+    return pcd, points
+
+def load_pointcloud(file_name, theta=0, axis=[0, 0, 1]):
+    if file_name.split(".")[-1] == "pcd":
+        pcd, points = load_pcd(file_name, theta, axis)
+    else:
+        pcd, points = load_mat(file_name, theta, axis)
+
+    return pcd, points
+
 if __name__ == "__main__":
+    np.random.seed(0)
+
     center = [-1, 0, 0]
     axis = [0, 0, 1]
     theta = math.radians(45)
 
-    #pcd2 = o3d.geometry.PointCloud()
-    file_name = "pointclouds/car_cart4_down_10per.pcd"
-    #other_points = scipy.io.loadmat(file_name)['car_cart']
-    #other_points += np.random.normal(0, 0.000001, other_points.shape)
-    #other_points = np.dot(rotation_matrix(axis, theta), other_points.T).T
+    file_name = "pointclouds/car_cart4.mat"
+    pcd, other_points = load_pointcloud(file_name)
 
-    #end_points = other_points[np.random.choice(len(other_points), size=NUMBER_OF_RAYS, replace=False)]
-    #cent = np.sum(other_points, axis=0) / other_points.shape[0]
-    #pcd2.points = o3d.utility.Vector3dVector(other_points)
-    pcd2 = o3d.io.read_point_cloud(file_name)
-    other_points = np.asarray(pcd2.points)
     cent = np.sum(other_points, axis=0) / other_points.shape[0]
-
     O = np.zeros(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
     O.T[0] = SINK_CENTER[0]
     O.T[1] = SINK_CENTER[1]
     O.T[2] = SINK_CENTER[2]
     D = np.array(sunflower(cent[0], NUMBER_OF_RAYS, 2,alpha=0, geodesic=False)) - O
+    #D = -np.random.rand(*O.shape)
     D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
     g1 = []
 
-    pcd_tree = o3d.geometry.KDTreeFlann(pcd2)
+    pcd_tree = o3d.geometry.KDTreeFlann(pcd)
 
     world = World()
 
-    add_sink(world, g1, center=O[1])
-    create_splats(world, pcd2, pcd_tree, SPLAT_SIZE, THRESHOLD, PERC, other_points)
+    add_sink(world, g1, center=SINK_CENTER, radius=SINK_RADIUS)
+    create_splats(world, pcd, pcd_tree, SPLAT_SIZE, THRESHOLD, PERC, other_points)
     #add_floor(world)
     world.construct_world_splat()
 
-    batches = 1
+    batches = 2
     bs = NUMBER_OF_RAYS // batches
 
 
@@ -308,7 +331,7 @@ if __name__ == "__main__":
     geometries_true = []
     for ls in geometries:
         geometries_true.append(create_lineset(ls.start, ls.end, ls.depth, de=True))
-    geometries_true.append(pcd2)
+    geometries_true.append(pcd)
     geometries_true.append(g1[0])
     print(returns[0])
     #mesh_box = o3d.geometry.TriangleMesh.create_box(width=30.0, height=30.0, depth=0.01).translate((-10, -10, -0.02))
