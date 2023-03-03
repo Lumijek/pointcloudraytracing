@@ -121,7 +121,6 @@ def test_sink_hit(O, D, geometry, returns, depth):
     D_new = D[sink_indexes]
     t = hits[sink_indexes]
     if(t.size > 0):
-        print(t.size)
         H = O_new + D_new * t[:, None]
         if depth == 1:
             l = create_lineset(O_new, H, 100)
@@ -219,19 +218,13 @@ def cast_ray(world, O, D, depth, geometry, returns):
     cast_ray(world, O, reflected, depth - 1, geometry, returns)
     return last_hit
 
-def add_sink(world, geometries, radius=SINK_RADIUS, center=[-12, 2, 10]):
-    print(center, radius)
+def add_sink(world, geometries, radius=SINK_RADIUS, center=SINK_CENTER):
     world.sink = Sphere(center, radius)
     mesh_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=radius).translate(center)
     mesh_sphere.compute_vertex_normals()
     mesh_sphere.paint_uniform_color([0.4, 0.8, 0.3])
 
     geometries.append(mesh_sphere)
-
-def batch(other_points, ray_num, geometries):
-    pass
-
-
 
 def sunflower(x, n, r_fac, alpha=0, geodesic=False):
     phi = (1 + sqrt(5)) / 2  # golden ratio
@@ -300,7 +293,7 @@ if __name__ == "__main__":
     O.T[1] = SINK_CENTER[1]
     O.T[2] = SINK_CENTER[2]
     D = np.array(sunflower(cent[0], NUMBER_OF_RAYS, 2,alpha=0, geodesic=False)) - O
-    #D = -np.random.rand(*O.shape)
+    #D = -np.random.rand(*O.shape) 
     D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
     g1 = []
 
@@ -310,12 +303,11 @@ if __name__ == "__main__":
 
     add_sink(world, g1, center=SINK_CENTER, radius=SINK_RADIUS)
     create_splats(world, pcd, pcd_tree, SPLAT_SIZE, THRESHOLD, PERC, other_points)
-    #add_floor(world)
+    #add_floor(world) # Adds floor
     world.construct_world_splat()
 
-    batches = 2
+    batches = 10
     bs = NUMBER_OF_RAYS // batches
-
 
     manager = mp.Manager()
     geometries = manager.list()
@@ -333,8 +325,6 @@ if __name__ == "__main__":
         geometries_true.append(create_lineset(ls.start, ls.end, ls.depth, de=True))
     geometries_true.append(pcd)
     geometries_true.append(g1[0])
-    print(returns[0])
-    #mesh_box = o3d.geometry.TriangleMesh.create_box(width=30.0, height=30.0, depth=0.01).translate((-10, -10, -0.02))
-    #geometries_true.append(mesh_box)
+    print("Number of hits:", returns[0])
     o3d.visualization.draw_geometries(geometries_true)
 
