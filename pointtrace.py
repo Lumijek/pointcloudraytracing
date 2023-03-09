@@ -8,21 +8,25 @@ from collections import defaultdict
 import scipy
 import math
 import time
-import matplotlib.pyplot as plt
-from tqdm import tqdm
 from math import sqrt, sin, cos, pi
 import multiprocessing as mp
-from functools import partial
+import resource
+from pprint import pprint
 
+np.random.seed(2)
 M_FACTOR = 0.04
 PERC = 0.3
-THRESHOLD = 0.3
+THRESHOLD = 0.2
 NUMBER_OF_POINTS = 100_000
-NUMBER_OF_RAYS =  1000
+NUMBER_OF_RAYS = 500
 DEPTH = 3
 SPLAT_SIZE = 100
 SINK_CENTER = [5, 0, 0.0001]
 SINK_RADIUS = 1
+
+def cprint(*args, **kwargs):
+    print(*args, **kwargs)
+    sys.exit(0)
 
 class LineSet:
     def __init__(self, start, end, depth):
@@ -78,10 +82,8 @@ def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     )
 
     [k, idx, _] = pcd_tree.search_radius_vector_3d(point, radius * perc)
-    #np.asarray(pcd.colors)[idx, :] = [0, 1, 1]  # Convert all relevant points to blue.
-    s = np.size(activated[idx]) - np.count_nonzero(activated[idx])
     activated[idx] = True
-    return Splat(center, normal, radius, points)
+    return Splat(center, normal, radius)
 
 
 def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
@@ -113,31 +115,38 @@ def sphere_intersect(sphere_center, sphere_radius, origin, direction):
     dist = np.where(discriminant >= 0, (-b - np.sqrt(np.maximum(discriminant, 0))) / (2 * a), np.inf)
     return dist
 
-def test_sink_hit(O, D, geometry, returns, depth):
+def test_sink_hit(O, D, geometry, returns, depth, paths, sink_paths):
     hits = sphere_intersect(SINK_CENTER, SINK_RADIUS, O, D)
     sink_indexes = np.where(hits != np.inf)[0]
     non_sink_indexes = np.where(hits == np.inf)[0]
+    good_paths = [paths[i] for i in sink_indexes]
+    #print(paths)
+    #good_paths = []
     O_new = O[sink_indexes]
     D_new = D[sink_indexes]
     t = hits[sink_indexes]
     if(t.size > 0):
         H = O_new + D_new * t[:, None]
-        if depth == 1:
-            l = create_lineset(O_new, H, 100)
-            geometry.append(l)
-            returns[0] += t.size
+        for i in range(len(good_paths)):
+            p = good_paths[i]
+            p.insert(-1, (O_new[i], H[i]))
+            sink_paths.append(p)
+            sys.stdout.flush()
+        l = create_lineset(O_new, H, 100)
+        geometry.append(l)
+        returns[0] += t.size
         return O[non_sink_indexes], D[non_sink_indexes]
     else:
         return O, D
 
-def improved_ray_splat_intersection(O, D, world, depth, geometry, returns):
+def improved_ray_splat_intersection(O, D, world, depth, geometry, returns, paths, sink_paths):
 
     center = world.center
     normal = world.normal
     radius = world.radius
     radius_squared = world.radius_squared
     if(depth != DEPTH):
-        O, D = test_sink_hit(O, D, geometry, returns, depth) # hit line set 
+        O, D = test_sink_hit(O, D, geometry, returns, depth, paths.copy(), sink_paths) # hit line set 
     denoms = normal.dot(D.T)
     t = np.einsum("ijk, ik->ij", (center[:, None] - O), normal) / denoms
     t[t < 0] = np.inf
@@ -176,7 +185,7 @@ def improved_ray_splat_intersection(O, D, world, depth, geometry, returns):
             inds[cid] = r
     ls = create_lineset(O[inds], true_points, depth)
     ns = None#ns = create_lineset(center, center + normal, depth)
-    return true_points, D[inds], normals, hits, ls, ns
+    return true_points, D[inds], normals, hits, ls, ns, inds
 
 
 def create_lineset(O, H, depth, de=False):
@@ -184,7 +193,7 @@ def create_lineset(O, H, depth, de=False):
         return LineSet(O, H, depth)
     points = []
     for i in range(O.shape[0]):
-        if (np.sum(np.square(O[i] - H[i])) > 20): continue
+        if (np.sum(np.square(O[i] - H[i])) > 100000): continue
         points.append(O[i].tolist())
         points.append(H[i].tolist())
 
@@ -202,10 +211,11 @@ def create_lineset(O, H, depth, de=False):
     line_set.colors = o3d.utility.Vector3dVector(colors)
     return line_set
     
-def cast_ray(world, O, D, depth, geometry, returns):
+def cast_ray(world, O, D, depth, geometry, returns, paths, sink_paths):
     if depth == 0:
         return geometry
-    O, D, normals, t, line_set, normal_set = improved_ray_splat_intersection(O, D, world, depth, geometry, returns)
+    O, D, normals, t, line_set, normal_set, inds = improved_ray_splat_intersection(O, D, world, depth, geometry, returns, paths, sink_paths)
+
     if type(O) == int:
         return geometry
     #geometry.append(line_set)
@@ -215,7 +225,12 @@ def cast_ray(world, O, D, depth, geometry, returns):
     reflected = D - 2 * np.sum(D * normals, axis=1)[:, None] * normals
     O += reflected * M_FACTOR
     last_hit = create_lineset(O, O + reflected * 0.5, 99)
-    cast_ray(world, O, reflected, depth - 1, geometry, returns)
+
+    paths = [paths[i] for i in inds]
+    for i, p in enumerate(paths):
+        p.insert(-1, (O[i], reflected[i]))
+
+    cast_ray(world, O, reflected, depth - 1, geometry, returns, paths, sink_paths)
     return last_hit
 
 def add_sink(world, geometries, radius=SINK_RADIUS, center=SINK_CENTER):
@@ -278,14 +293,14 @@ def load_pointcloud(file_name, theta=0, axis=[0, 0, 1]):
     return pcd, points
 
 if __name__ == "__main__":
-    np.random.seed(0)
+    np.random.seed(2)
 
     center = [-1, 0, 0]
     axis = [0, 0, 1]
-    theta = math.radians(45)
+    theta = math.radians(90)
 
     file_name = "pointclouds/car_cart4.mat"
-    pcd, other_points = load_pointcloud(file_name)
+    pcd, other_points = load_pointcloud(file_name, theta)
 
     cent = np.sum(other_points, axis=0) / other_points.shape[0]
     O = np.zeros(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
@@ -306,7 +321,8 @@ if __name__ == "__main__":
     #add_floor(world) # Adds floor
     world.construct_world_splat()
 
-    batches = 10
+
+    batches = 2
     bs = NUMBER_OF_RAYS // batches
 
     manager = mp.Manager()
@@ -314,12 +330,18 @@ if __name__ == "__main__":
     returns = manager.list()
     returns.append(0)
     params = []
+    sink_paths = manager.list()
     for i in range(batches):
-        params.append((world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], DEPTH, geometries, returns))
+        paths = [["running"] for _ in range(bs)]
+        for ind in range(len(paths)):
+            paths[ind].insert(-1, (O[i * bs + ind], D[i * bs + ind]))
+
+        params.append((world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], DEPTH, geometries, returns, paths, sink_paths))
 
     with mp.Pool() as pool:
         ret = pool.starmap(cast_ray, params)
 
+    print(len(sink_paths))
     geometries_true = []
     for ls in geometries:
         geometries_true.append(create_lineset(ls.start, ls.end, ls.depth, de=True))
@@ -327,4 +349,6 @@ if __name__ == "__main__":
     geometries_true.append(g1[0])
     print("Number of hits:", returns[0])
     o3d.visualization.draw_geometries(geometries_true)
+
+    pprint(list(sink_paths))
 

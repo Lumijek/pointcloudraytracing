@@ -2,12 +2,11 @@ import numpy as np
 
 
 class Splat:
-    def __init__(self, center, normal, radius, points):
+    def __init__(self, center, normal, radius):
         self.center = center
         self.normal = normal
         self.radius = radius
         self.radius_squared = radius * radius
-        self.points = points
 
 class Sphere:
     def __init__(self, center, radius):
