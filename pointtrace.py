@@ -130,7 +130,8 @@ def test_sink_hit(O, D, geometry, returns, depth, paths, sink_paths):
         for i in range(len(good_paths)):
             p = good_paths[i]
             p[-2].append(t[i])
-            p.insert(-1, [H[i], "hit"])
+            p.insert(-1, [H[i]])
+            p = p[:-1]
             sink_paths.append(p)
             sys.stdout.flush()
         l = create_lineset(O_new, H, 100)
