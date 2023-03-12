@@ -14,11 +14,11 @@ import resource
 from pprint import pprint
 
 np.random.seed(2)
-M_FACTOR = 0.04
+M_FACTOR = 0.004
 PERC = 0.3
 THRESHOLD = 0.2
 NUMBER_OF_POINTS = 100_000
-NUMBER_OF_RAYS = 500
+NUMBER_OF_RAYS = 100
 DEPTH = 3
 SPLAT_SIZE = 100
 SINK_CENTER = [5, 0, 0.0001]
@@ -129,7 +129,8 @@ def test_sink_hit(O, D, geometry, returns, depth, paths, sink_paths):
         H = O_new + D_new * t[:, None]
         for i in range(len(good_paths)):
             p = good_paths[i]
-            p.insert(-1, (O_new[i], H[i]))
+            p[-2].append(t[i])
+            p.insert(-1, [H[i], "hit"])
             sink_paths.append(p)
             sys.stdout.flush()
         l = create_lineset(O_new, H, 100)
@@ -228,7 +229,8 @@ def cast_ray(world, O, D, depth, geometry, returns, paths, sink_paths):
 
     paths = [paths[i] for i in inds]
     for i, p in enumerate(paths):
-        p.insert(-1, (O[i], reflected[i]))
+        p[-2].append(t[i])
+        p.insert(-1, [O[i], reflected[i]])
 
     cast_ray(world, O, reflected, depth - 1, geometry, returns, paths, sink_paths)
     return last_hit
@@ -334,7 +336,7 @@ if __name__ == "__main__":
     for i in range(batches):
         paths = [["running"] for _ in range(bs)]
         for ind in range(len(paths)):
-            paths[ind].insert(-1, (O[i * bs + ind], D[i * bs + ind]))
+            paths[ind].insert(-1, [O[i * bs + ind], D[i * bs + ind]])
 
         params.append((world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], DEPTH, geometries, returns, paths, sink_paths))
 
