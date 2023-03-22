@@ -17,12 +17,14 @@ np.random.seed(2)
 M_FACTOR = 0.004
 PERC = 0.3
 THRESHOLD = 0.2
-NUMBER_OF_POINTS = 100_000
-NUMBER_OF_RAYS = 100
+NUMBER_OF_POINTS = 200_000
+NUMBER_OF_RAYS = 2000
 DEPTH = 3
 SPLAT_SIZE = 100
 SINK_CENTER = [5, 0, 0.0001]
 SINK_RADIUS = 1
+BATCHES = 10
+BATCH_SIZE = NUMBER_OF_RAYS // BATCHES
 
 def cprint(*args, **kwargs):
     print(*args, **kwargs)
@@ -205,14 +207,26 @@ def create_lineset(O, H, depth, de=False):
 
     if depth == 100:
         colors = [[0, 0, 0] for _ in range(len(lines))]
+    elif depth == 1000:
+        colors = [[0 , 0.75, 1] for _ in range(len(lines))]
     else:
         colors = [[1, 0, 0] for _ in range(len(lines))]
+
     line_set = o3d.geometry.LineSet()
     line_set.points = o3d.utility.Vector3dVector(points)
     line_set.lines = o3d.utility.Vector2iVector(lines)
     line_set.colors = o3d.utility.Vector3dVector(colors)
     return line_set
-    
+
+def get_hit_paths(hits):
+    O = []
+    H = []
+    for hit in hits:
+        for i in range(len(hit) - 1):
+            O.append(hit[i][0])
+            H.append(hit[i + 1][0])
+    return np.array(O), np.array(H)
+
 def cast_ray(world, O, D, depth, geometry, returns, paths, sink_paths):
     if depth == 0:
         return geometry
@@ -325,33 +339,32 @@ if __name__ == "__main__":
     world.construct_world_splat()
 
 
-    batches = 2
-    bs = NUMBER_OF_RAYS // batches
-
     manager = mp.Manager()
     geometries = manager.list()
     returns = manager.list()
     returns.append(0)
     params = []
     sink_paths = manager.list()
-    for i in range(batches):
-        paths = [["running"] for _ in range(bs)]
+    for i in range(BATCHES):
+        paths = [["running"] for _ in range(BATCH_SIZE)]
         for ind in range(len(paths)):
-            paths[ind].insert(-1, [O[i * bs + ind], D[i * bs + ind]])
+            paths[ind].insert(-1, [O[i * BATCH_SIZE + ind], D[i * BATCH_SIZE + ind]])
 
-        params.append((world, O[(i * bs): ((i + 1) * bs)], D[(i * bs): ((i + 1) * bs)], DEPTH, geometries, returns, paths, sink_paths))
+        params.append((world, O[(i * BATCH_SIZE): ((i + 1) * BATCH_SIZE)], D[(i * BATCH_SIZE): ((i + 1) * BATCH_SIZE)], DEPTH, geometries, returns, paths, sink_paths))
 
     with mp.Pool() as pool:
         ret = pool.starmap(cast_ray, params)
 
-    print(len(sink_paths))
     geometries_true = []
     for ls in geometries:
         geometries_true.append(create_lineset(ls.start, ls.end, ls.depth, de=True))
     geometries_true.append(pcd)
     geometries_true.append(g1[0])
     print("Number of hits:", returns[0])
-    o3d.visualization.draw_geometries(geometries_true)
 
-    pprint(list(sink_paths))
+    sink_paths = list(sink_paths)
+    O, H = get_hit_paths(sink_paths)
+    geometries_true.append(create_lineset(O, H, 1000, de=True))
+
+    o3d.visualization.draw_geometries(geometries_true)
 
