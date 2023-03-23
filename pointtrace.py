@@ -18,7 +18,7 @@ M_FACTOR = 0.004
 PERC = 0.3
 THRESHOLD = 0.2
 NUMBER_OF_POINTS = 200_000
-NUMBER_OF_RAYS = 2000
+NUMBER_OF_RAYS = 500
 DEPTH = 3
 SPLAT_SIZE = 100
 SINK_CENTER = [5, 0, 0.0001]
@@ -357,12 +357,13 @@ if __name__ == "__main__":
 
     geometries_true = []
     for ls in geometries:
-        geometries_true.append(create_lineset(ls.start, ls.end, ls.depth, de=True))
+        pass#geometries_true.append(create_lineset(ls.start, ls.end, ls.depth, de=True))
     geometries_true.append(pcd)
     geometries_true.append(g1[0])
     print("Number of hits:", returns[0])
 
     sink_paths = list(sink_paths)
+    print(len(sink_paths))
     O, H = get_hit_paths(sink_paths)
     geometries_true.append(create_lineset(O, H, 1000, de=True))
 
