@@ -1,6 +1,5 @@
 import numpy as np
 
-
 class Splat:
     def __init__(self, center, normal, radius):
         self.center = center
@@ -12,7 +11,6 @@ class Sphere:
     def __init__(self, center, radius):
         self.center = center
         self.radius = radius
-
 
 class World:
     def __init__(self):

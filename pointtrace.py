@@ -11,20 +11,25 @@ import time
 from math import sqrt, sin, cos, pi
 import multiprocessing as mp
 import resource
+import atexit
 from pprint import pprint
+import signal
 
-np.random.seed(2)
-M_FACTOR = 0.004
+
+M_FACTOR = 0.05
 PERC = 0.3
 THRESHOLD = 0.2
 NUMBER_OF_POINTS = 200_000
-NUMBER_OF_RAYS = 500
-DEPTH = 3
+NUMBER_OF_RAYS = 100
+DEPTH = 4
 SPLAT_SIZE = 100
-SINK_CENTER = [5, 0, 0.0001]
+SINK_CENTER = [5.0001, 0.0001, 0.5001]
 SINK_RADIUS = 1
-BATCHES = 10
+BATCHES = 8
 BATCH_SIZE = NUMBER_OF_RAYS // BATCHES
+
+def exit_handler():
+    f.close()
 
 def cprint(*args, **kwargs):
     print(*args, **kwargs)
@@ -87,7 +92,6 @@ def generate_splat(pcd, pcd_tree, point, k, threshold, perc, points, activated):
     activated[idx] = True
     return Splat(center, normal, radius)
 
-
 def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
     activated = np.full(len(points), False)
     available_indices = np.where(activated == 0)[0]
@@ -95,10 +99,11 @@ def create_splats(world, pcd, pcd_tree, k, threshold, perc, points):
     c = 0
     while True:
         i += 1
-        if i % 10000 == 0:
+        if i % 1000 == 0:
             c += 1
             s = np.sum(activated)
-            print("Points covered:", s, ", Splats:", i)
+            print("Points covered:", s, ", Splats:", i, flush=True)
+            
             if s > NUMBER_OF_POINTS:
                 break
 
@@ -144,7 +149,6 @@ def test_sink_hit(O, D, geometry, returns, depth, paths, sink_paths):
         return O, D
 
 def improved_ray_splat_intersection(O, D, world, depth, geometry, returns, paths, sink_paths):
-
     center = world.center
     normal = world.normal
     radius = world.radius
@@ -168,8 +172,8 @@ def improved_ray_splat_intersection(O, D, world, depth, geometry, returns, paths
     try:
         l = np.max(ids) + 1
     except:
-        return 1, 1, 1, 1, 1, 1
-
+        return 1, 1, 1, 1, 1, 1, 1
+ 
     origin_distances = points[k] - O[k[1]]
     k = np.column_stack((k[1], k[0], ids))
     true_points = np.full((l, 3), np.inf)
@@ -222,6 +226,8 @@ def get_hit_paths(hits):
     O = []
     H = []
     for hit in hits:
+        if len(hit) != 4:
+            continue
         for i in range(len(hit) - 1):
             O.append(hit[i][0])
             H.append(hit[i + 1][0])
@@ -231,10 +237,9 @@ def cast_ray(world, O, D, depth, geometry, returns, paths, sink_paths):
     if depth == 0:
         return geometry
     O, D, normals, t, line_set, normal_set, inds = improved_ray_splat_intersection(O, D, world, depth, geometry, returns, paths, sink_paths)
-
     if type(O) == int:
         return geometry
-    #geometry.append(line_set)
+    geometry.append(line_set)
     #geometry.append(normal_set)
     bad_normals = np.where(np.sum(D * normals, axis=1) > 0)[0]  # If ray and normal are on same side(dot product > 0) make the normal negative
     normals[bad_normals] = -normals[bad_normals]
@@ -310,51 +315,67 @@ def load_pointcloud(file_name, theta=0, axis=[0, 0, 1]):
     return pcd, points
 
 if __name__ == "__main__":
-    np.random.seed(2)
-
-    center = [-1, 0, 0]
+    global f
+    f = open("ray_batch.txt", "a")
+    atexit.register(exit_handler)
+    signal.signal(signal.SIGTERM, exit_handler)
+    signal.signal(signal.SIGINT, exit_handler)
+    center = [-1, 1, 1]
     axis = [0, 0, 1]
     theta = math.radians(90)
 
     file_name = "pointclouds/car_cart4.mat"
     pcd, other_points = load_pointcloud(file_name, theta)
-
     cent = np.sum(other_points, axis=0) / other_points.shape[0]
-    O = np.zeros(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
-    O.T[0] = SINK_CENTER[0]
-    O.T[1] = SINK_CENTER[1]
-    O.T[2] = SINK_CENTER[2]
-    D = np.array(sunflower(cent[0], NUMBER_OF_RAYS, 2,alpha=0, geodesic=False)) - O
-    #D = -np.random.rand(*O.shape) 
-    D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
+    pcd_tree = o3d.geometry.KDTreeFlann(pcd)
     g1 = []
 
-    pcd_tree = o3d.geometry.KDTreeFlann(pcd)
+    for rays in range(4000, 50000, 1000):
+        print(rays)
+        f.write(f"Rays: {rays}\n\n")
+        NUMBER_OF_RAYS = rays
+        O = np.zeros(NUMBER_OF_RAYS * 3).reshape(NUMBER_OF_RAYS, 3)
+        O.T[0] = SINK_CENTER[0]
+        O.T[1] = SINK_CENTER[1]
+        O.T[2] = SINK_CENTER[2]
+        D = np.array(sunflower(cent[0], NUMBER_OF_RAYS, 2 ,alpha=0, geodesic=False)) - O
+        #D = -np.random.rand(*O.shape) 
+        D = D / np.linalg.norm(D, axis=1, keepdims=True)  # normalize directions
 
-    world = World()
+        for batches in range(10, 100):
+            print(batches)
+            BATCHES = batches
+            BATCH_SIZE = NUMBER_OF_RAYS // BATCHES
+            f.write(f"Batch Size: {BATCH_SIZE} ")
 
-    add_sink(world, g1, center=SINK_CENTER, radius=SINK_RADIUS)
-    create_splats(world, pcd, pcd_tree, SPLAT_SIZE, THRESHOLD, PERC, other_points)
-    #add_floor(world) # Adds floor
-    world.construct_world_splat()
+            g1 = []
+            world = World()
+            add_sink(world, g1, center=SINK_CENTER, radius=SINK_RADIUS)
+            create_splats(world, pcd, pcd_tree, SPLAT_SIZE, THRESHOLD, PERC, other_points)
+            world.construct_world_splat()
+            f.write(f"Splats: {len(world.splats)} ")
 
+            start = time.perf_counter()
+            manager = mp.Manager()
+            geometries = manager.list()
+            returns = manager.list()
+            returns.append(0)
+            params = []
+            sink_paths = manager.list()
+            for i in range(BATCHES):
+                paths = [["running"] for _ in range(BATCH_SIZE)]
+                for ind in range(len(paths)):
+                    paths[ind].insert(-1, [O[i * BATCH_SIZE + ind], D[i * BATCH_SIZE + ind]])
 
-    manager = mp.Manager()
-    geometries = manager.list()
-    returns = manager.list()
-    returns.append(0)
-    params = []
-    sink_paths = manager.list()
-    for i in range(BATCHES):
-        paths = [["running"] for _ in range(BATCH_SIZE)]
-        for ind in range(len(paths)):
-            paths[ind].insert(-1, [O[i * BATCH_SIZE + ind], D[i * BATCH_SIZE + ind]])
+                params.append((world, O[(i * BATCH_SIZE): ((i + 1) * BATCH_SIZE)], D[(i * BATCH_SIZE): ((i + 1) * BATCH_SIZE)], DEPTH, geometries, returns, paths, sink_paths))
 
-        params.append((world, O[(i * BATCH_SIZE): ((i + 1) * BATCH_SIZE)], D[(i * BATCH_SIZE): ((i + 1) * BATCH_SIZE)], DEPTH, geometries, returns, paths, sink_paths))
+            with mp.Pool() as pool:
+                ret = pool.starmap(cast_ray, params)
 
-    with mp.Pool() as pool:
-        ret = pool.starmap(cast_ray, params)
-
+            end = time.perf_counter()
+            time_taken = round(end-start, 4)
+            f.write(f"Time: {time_taken}\n")
+    f.close()
     geometries_true = []
     for ls in geometries:
         pass#geometries_true.append(create_lineset(ls.start, ls.end, ls.depth, de=True))
@@ -366,6 +387,16 @@ if __name__ == "__main__":
     print(len(sink_paths))
     O, H = get_hit_paths(sink_paths)
     geometries_true.append(create_lineset(O, H, 1000, de=True))
+    '''
+    for s in world.splats:
+        disk = o3d.geometry.TriangleMesh.create_cylinder(radius = s.radius, height = 0.001, resolution=3, split=1)
+        disk.compute_vertex_normals()
+        n1 = np.asarray(disk.triangle_normals[0])
+        v = np.cross(n1, s.normal)
 
+        R = disk.get_rotation_matrix_from_axis_angle(v)
+        disk.rotate(R).translate(s.center)
+        geometries_true.append(disk)
+    '''
     o3d.visualization.draw_geometries(geometries_true)
 
